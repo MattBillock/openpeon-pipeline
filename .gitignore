@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Extraction runtime
+extraction/*/extraction.log
+extraction/*/unverified/
+
+# Dashboard working data
+drafts/
+
+# OS
+.DS_Store
+
+# Staging area
+staging/

@@ -1,0 +1,377 @@
+{
+  "rumack_hospital": {
+    "quote": "A hospital! What is it?",
+    "timestamp": 3000,
+    "duration": 2,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 3000,
+        "result": "no_match",
+        "heard": "The radio. Do you know anything about planes? Well, I flew in the war, but it was years ago. I would"
+      },
+      {
+        "offset": -30,
+        "center": 2970,
+        "result": "matched",
+        "score": 0.769,
+        "matched_text": "cockpit? What is it?"
+      }
+    ],
+    "extracted_at": "2026-02-25T22:10:45.544347",
+    "pre_match_score": 0.769,
+    "pre_match_text": "cockpit? What is it?",
+    "verify_score": 0.744,
+    "verify_heard": "To close it? What is it?",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "dont_call_me_shirley": {
+    "quote": "I am serious. And don't call me Shirley.",
+    "timestamp": 1200,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.932,
+        "matched_text": "I am serious, and don't call me surely.",
+        "timestamp": 2995.1
+      }
+    ],
+    "extracted_at": "2026-02-26T00:07:49.466892",
+    "pre_match_score": 0.932,
+    "pre_match_text": "I am serious, and don't call me surely.",
+    "found_at": 2995.1,
+    "verify_score": 1.0,
+    "verify_heard": "I am serious and don't call me Shirley",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "rumack_its_a_big_building": {
+    "quote": "It's a big building with patients, but that's not important right now.",
+    "timestamp": 3000,
+    "duration": 4,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "It's a big building with patients, but that's not important right now.",
+        "timestamp": 2292.4
+      }
+    ],
+    "extracted_at": "2026-02-26T00:07:55.337313",
+    "pre_match_score": 1.0,
+    "pre_match_text": "It's a big building with patients, but that's not important right now.",
+    "found_at": 2292.4,
+    "verify_score": 1.0,
+    "verify_heard": "It's a big building with patients, but that's not important right now",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "rumack_good_luck": {
+    "quote": "Good luck. We're all counting on you.",
+    "timestamp": 4800,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "good luck. We're all counting on you.",
+        "timestamp": 4549.9
+      }
+    ],
+    "extracted_at": "2026-02-26T01:01:43.752018",
+    "pre_match_score": 1.0,
+    "pre_match_text": "good luck. We're all counting on you.",
+    "found_at": 4549.9,
+    "verify_score": 0.883,
+    "verify_heard": "you both good luck we're all counting on you",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "rumack_picked_wrong_week": {
+    "quote": "Looks like I picked the wrong week to quit smoking.",
+    "timestamp": 2400,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.913,
+        "matched_text": "Looks like I picked the wrong week, quit on",
+        "timestamp": 3814.3
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:06.907186",
+    "pre_match_score": 0.913,
+    "pre_match_text": "Looks like I picked the wrong week, quit on",
+    "found_at": 3814.3,
+    "verify_score": 0.909,
+    "verify_heard": "Looks like I picked the wrong week to quit. I'm fit.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "rumack_surely_you_cant_be_serious": {
+    "quote": "Surely you can't be serious.",
+    "timestamp": 1200,
+    "duration": 2,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "Surely you can't be serious.",
+        "timestamp": 2993.2
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:12.295056",
+    "pre_match_score": 1.0,
+    "pre_match_text": "Surely you can't be serious.",
+    "found_at": 2993.2,
+    "verify_score": 1.0,
+    "verify_heard": "Surely you can't be serious.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "rumack_food_poisoning": {
+    "quote": "The life of everyone on board depends upon just one thing: finding someone back there who can not only fly this plane, but who didn't have fish for dinner.",
+    "timestamp": 2400,
+    "duration": 8,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "The life of everyone on board depends upon just one thing. Finding someone back there who can not only fly this plane, but who didn't have fish for dinner.",
+        "timestamp": 2778.0
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:16.163034",
+    "pre_match_score": 1.0,
+    "pre_match_text": "The life of everyone on board depends upon just one thing. Finding someone back there who can not only fly this plane, but who didn't have fish for dinner.",
+    "found_at": 2778.0,
+    "verify_score": 0.987,
+    "verify_heard": "The life of everyone on board depends upon just one thing. Finding someone back there can not only fly this plane, but who didn't have fish for dinner.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "wrong_week_quit_smoking": {
+    "quote": "Looks like I picked the wrong week to quit smoking.",
+    "timestamp": 1800,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.913,
+        "matched_text": "Looks like I picked the wrong week, quit on",
+        "timestamp": 3814.3
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:36.643628",
+    "pre_match_score": 0.913,
+    "pre_match_text": "Looks like I picked the wrong week, quit on",
+    "found_at": 3814.3,
+    "verify_score": 0.909,
+    "verify_heard": "Looks like I picked the wrong week to quit. I'm fit.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "wrong_week_quit_drinking": {
+    "quote": "Looks like I picked the wrong week to quit drinking.",
+    "timestamp": 2400,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.882,
+        "matched_text": "Looks like I picked the wrong week, quit on",
+        "timestamp": 3814.3
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:41.989374",
+    "pre_match_score": 0.882,
+    "pre_match_text": "Looks like I picked the wrong week, quit on",
+    "found_at": 3814.3,
+    "verify_score": 0.9,
+    "verify_heard": "Looks like I picked the wrong week to quit. I'm fit.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "wrong_week_quit_sniffing": {
+    "quote": "Looks like I picked the wrong week to quit sniffing glue.",
+    "timestamp": 3000,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.937,
+        "matched_text": "Looks like I picked the wrong way to quit sniffing blue.",
+        "timestamp": 4601.7
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:47.373219",
+    "pre_match_score": 0.937,
+    "pre_match_text": "Looks like I picked the wrong way to quit sniffing blue.",
+    "found_at": 4601.7,
+    "verify_score": 0.937,
+    "verify_heard": "Looks like I picked the wrong way to quit sniffing blue.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "wrong_week_quit_amphetamines": {
+    "quote": "Looks like I picked the wrong week to quit amphetamines.",
+    "timestamp": 3600,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.845,
+        "matched_text": "Looks like I picked the wrong week, quit on",
+        "timestamp": 3814.3
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:53.346693",
+    "pre_match_score": 0.845,
+    "pre_match_text": "Looks like I picked the wrong week, quit on",
+    "found_at": 3814.3,
+    "verify_score": 0.865,
+    "verify_heard": "Looks like I picked the wrong week to quit. I'm fit.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "johnny_jive": {
+    "quote": "Oh stewardess, I speak jive.",
+    "timestamp": 2400,
+    "duration": 2,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.769,
+        "matched_text": "Oh, it's Jordis. I speak Jive.",
+        "timestamp": 3620.4
+      }
+    ],
+    "extracted_at": "2026-02-26T00:08:58.924836",
+    "pre_match_score": 0.769,
+    "pre_match_text": "Oh, it's Jordis. I speak Jive.",
+    "found_at": 3620.4,
+    "verify_score": 0.68,
+    "verify_heard": "Oh, Sturtis. I speak child.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "roger_roger": {
+    "quote": "Roger, Roger. What's our vector, Victor?",
+    "timestamp": 1200,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "Roger, Roger. What's our vector, Victor?",
+        "timestamp": 815.0
+      }
+    ],
+    "extracted_at": "2026-02-26T00:09:02.707765",
+    "pre_match_score": 1.0,
+    "pre_match_text": "Roger, Roger. What's our vector, Victor?",
+    "found_at": 815.0,
+    "verify_score": 1.0,
+    "verify_heard": "Roger, Roger. What's our vector, Victor?",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "over_over": {
+    "quote": "Over, Oveur.",
+    "timestamp": 1200,
+    "duration": 1,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.947,
+        "matched_text": "over. Over.",
+        "timestamp": 820.8
+      }
+    ],
+    "extracted_at": "2026-02-26T01:01:11.798378",
+    "pre_match_score": 0.947,
+    "pre_match_text": "over. Over.",
+    "found_at": 820.8,
+    "verify_score": 0.643,
+    "verify_heard": "Clarence over. Over.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "clearance_clarence": {
+    "quote": "Roger, Roger. What's our clearance, Clarence?",
+    "timestamp": 600,
+    "duration": 3,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.706,
+        "matched_text": "Roger, Roger. What's our vector,",
+        "timestamp": 815.0
+      }
+    ],
+    "extracted_at": "2026-02-26T00:09:10.637790",
+    "pre_match_score": 0.706,
+    "pre_match_text": "Roger, Roger. What's our vector,",
+    "found_at": 815.0
+  },
+  "striker_drinking_problem": {
+    "quote": "Drinking problem.",
+    "timestamp": 1800,
+    "duration": 1,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 1.0,
+        "matched_text": "drinking problem.",
+        "timestamp": 2136.2
+      }
+    ],
+    "extracted_at": "2026-02-26T01:02:26.885164",
+    "pre_match_score": 1.0,
+    "pre_match_text": "drinking problem.",
+    "found_at": 2136.2,
+    "verify_score": 0.842,
+    "verify_heard": "to my drinking problem.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  },
+  "striker_win_just_one": {
+    "quote": "Win just one for the Zipper.",
+    "timestamp": 4200,
+    "duration": 2,
+    "attempts": [
+      {
+        "method": "full_transcript",
+        "result": "matched",
+        "score": 0.941,
+        "matched_text": "win just one for the Zip.",
+        "timestamp": 4209.6
+      }
+    ],
+    "extracted_at": "2026-02-26T00:09:18.397376",
+    "pre_match_score": 0.941,
+    "pre_match_text": "win just one for the Zip.",
+    "found_at": 4209.6,
+    "verify_score": 0.931,
+    "verify_heard": "and win just one for the zipper.",
+    "verify_status": "verified",
+    "final_status": "verified"
+  }
+}

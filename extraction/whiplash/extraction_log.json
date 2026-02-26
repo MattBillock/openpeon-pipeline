@@ -1,0 +1,964 @@
+{
+  "looking_for_players_beyond_the_best": {
+    "quote": "I'm looking for players who are beyond the best.",
+    "timestamp": 840,
+    "duration": 3,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 840,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 810,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 870,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 780,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 900,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 750,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 930,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 720,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 960,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 690,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 990,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 660,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1020,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:10:45.378639",
+    "final_status": "failed"
+  },
+  "key_is_to_just_relax": {
+    "quote": "The key is to just relax.",
+    "timestamp": 900,
+    "duration": 2,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 900,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 870,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 930,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 840,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 960,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 810,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 990,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 780,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1020,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 750,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 720,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1080,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:15:03.623721",
+    "final_status": "failed"
+  },
+  "no_two_words_good_job": {
+    "quote": "There are no two words in the English language more harmful than good job.",
+    "timestamp": 5400,
+    "duration": 5,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 5400,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 5370,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 5430,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 5340,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 5460,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 5310,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 5490,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 5280,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 5520,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 5250,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 5550,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 5220,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 5580,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:15:19.173809",
+    "final_status": "failed"
+  },
+  "were_you_rushing_or_dragging": {
+    "quote": "Were you rushing or were you dragging?",
+    "timestamp": 1200,
+    "duration": 3,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1020,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1380,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:17:15.143412",
+    "final_status": "failed"
+  },
+  "start_counting": {
+    "quote": "Start counting.",
+    "timestamp": 1230,
+    "duration": 2,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1380,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1410,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:13.159781",
+    "final_status": "failed"
+  },
+  "rusher_or_dragger": {
+    "quote": "Now, are you a rusher or are you a dragger?",
+    "timestamp": 1260,
+    "duration": 3,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1380,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1410,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1440,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:23.488665",
+    "final_status": "failed"
+  },
+  "not_bad": {
+    "quote": "Not bad.",
+    "timestamp": 960,
+    "duration": 1,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 960,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 930,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 990,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 900,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1020,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 870,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 840,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 810,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 780,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1140,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:37.753870",
+    "final_status": "failed"
+  },
+  "good_job_just_kidding": {
+    "quote": "Good job. I'm just kidding.",
+    "timestamp": 900,
+    "duration": 3,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 900,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 870,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 930,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 840,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 960,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 810,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 990,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 780,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1020,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 750,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 720,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1080,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:52.756401",
+    "final_status": "failed"
+  },
+  "not_quite_my_tempo": {
+    "quote": "Not quite my tempo.",
+    "timestamp": 1200,
+    "duration": 2,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1050,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1020,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1380,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:56.154969",
+    "final_status": "failed"
+  },
+  "my_concern_with_you": {
+    "quote": "Here's my concern with you.",
+    "timestamp": 1500,
+    "duration": 2,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1500,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1470,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1530,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1440,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1560,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1410,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1590,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1380,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1620,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1650,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1680,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:18:59.902299",
+    "final_status": "failed"
+  },
+  "not_boyfriends_dick": {
+    "quote": "That is not your boyfriend's dick. Don't come too early.",
+    "timestamp": 1320,
+    "duration": 4,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1380,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1410,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1440,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1470,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1500,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:20:00.531525",
+    "final_status": "failed"
+  },
+  "answer": {
+    "quote": "Answer!",
+    "timestamp": 1260,
+    "duration": 1,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 1260,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 1230,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 1290,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 1200,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 1320,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 1170,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 1350,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 1140,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 1380,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 1110,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 1410,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 1080,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 1440,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:20:05.296445",
+    "final_status": "failed"
+  },
+  "double_fucking_rainbow": {
+    "quote": "Do I look like a double-fucking-rainbow to you?",
+    "timestamp": 3300,
+    "duration": 3,
+    "attempts": [
+      {
+        "offset": 0,
+        "center": 3300,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -30,
+        "center": 3270,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 30,
+        "center": 3330,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -60,
+        "center": 3240,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 60,
+        "center": 3360,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -90,
+        "center": 3210,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 90,
+        "center": 3390,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -120,
+        "center": 3180,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 120,
+        "center": 3420,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -150,
+        "center": 3150,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 150,
+        "center": 3450,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": -180,
+        "center": 3120,
+        "result": "whisper_failed"
+      },
+      {
+        "offset": 180,
+        "center": 3480,
+        "result": "whisper_failed"
+      }
+    ],
+    "extracted_at": "2026-02-26T01:20:09.702686",
+    "final_status": "failed"
+  }
+}
