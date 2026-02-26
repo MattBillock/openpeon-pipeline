@@ -12,6 +12,212 @@ log = logging.getLogger(__name__)
 
 EXTRACTION_DIR = os.path.expanduser("~/Development/AIOutput/openpeon/extraction")
 SCRIPTS_PATTERN = os.path.join(EXTRACTION_DIR, "extract_*.py")
+MOVIES_DIR = "/Volumes/D-drive-music/Movies"
+
+# Template for new extraction scripts
+_SCRIPT_TEMPLATE = '''#!/usr/bin/env python3
+"""Extract {title} audio clips."""
+import sys
+from extractor import run_extraction
+
+MKV = "{mkv_path}"
+AUDIO_STREAM = "{audio_stream}"
+
+CLIPS = [
+{clips_block}]
+
+if __name__ == "__main__":
+    run_extraction(
+        movie_name="{name}",
+        mkv_path=MKV,
+        audio_stream=AUDIO_STREAM,
+        clips=CLIPS,
+        targets=sys.argv[1:] if len(sys.argv) > 1 else None,
+    )
+'''
+
+
+def find_mkv_files(search_term=""):
+    """Search for MKV files on D-drive.
+
+    Returns list of dicts with 'dir_name', 'mkv_path', 'size_gb'.
+    """
+    results = []
+    if not os.path.isdir(MOVIES_DIR):
+        return results
+
+    for movie_dir in sorted(os.listdir(MOVIES_DIR)):
+        if search_term and search_term.lower() not in movie_dir.lower():
+            continue
+        full_dir = os.path.join(MOVIES_DIR, movie_dir)
+        if not os.path.isdir(full_dir):
+            continue
+        for f in os.listdir(full_dir):
+            if f.endswith(".mkv"):
+                mkv_path = os.path.join(full_dir, f)
+                try:
+                    size_gb = round(os.path.getsize(mkv_path) / (1024**3), 1)
+                except OSError:
+                    size_gb = 0
+                results.append({
+                    "dir_name": movie_dir,
+                    "mkv_path": mkv_path,
+                    "size_gb": size_gb,
+                })
+    return results
+
+
+def create_movie_script(name, title, mkv_path, audio_stream="0:1", clips=None):
+    """Create a new extraction script for a movie.
+
+    Args:
+        name: slug name (e.g. 'baseketball')
+        title: display title (e.g. 'BASEketball (1998)')
+        mkv_path: full path to MKV file
+        audio_stream: ffmpeg audio stream (default '0:1')
+        clips: optional list of (clip_name, timestamp, quote, duration) tuples
+
+    Returns:
+        dict with 'ok' and 'script_path' or 'error'
+    """
+    script_path = os.path.join(EXTRACTION_DIR, f"extract_{name}.py")
+    if os.path.exists(script_path):
+        return {"ok": False, "error": f"Script already exists: extract_{name}.py"}
+
+    # Format clips block
+    if clips:
+        lines = []
+        for clip_name, ts, quote, dur in clips:
+            # Escape quotes in the quote text
+            safe_quote = quote.replace('"', '\\"')
+            lines.append(f'    ("{clip_name}", {ts}, "{safe_quote}", {dur}),')
+        clips_block = "\n".join(lines) + "\n"
+    else:
+        clips_block = "    # Add clips: (clip_name, timestamp_seconds, quote_text, duration_seconds)\n"
+
+    content = _SCRIPT_TEMPLATE.format(
+        title=title,
+        name=name,
+        mkv_path=mkv_path,
+        audio_stream=audio_stream,
+        clips_block=clips_block,
+    )
+
+    # Write script
+    with open(script_path, "w") as f:
+        f.write(content)
+
+    # Create output directory
+    output_dir = os.path.join(EXTRACTION_DIR, name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    log.info("Created extraction script: %s", script_path)
+    return {"ok": True, "script_path": script_path}
+
+
+def add_clips_to_script(name, new_clips):
+    """Add clips to an existing extraction script.
+
+    Args:
+        name: movie slug
+        new_clips: list of (clip_name, timestamp, quote, duration) tuples
+
+    Returns:
+        dict with 'ok' and 'added' count or 'error'
+    """
+    script_path = os.path.join(EXTRACTION_DIR, f"extract_{name}.py")
+    if not os.path.exists(script_path):
+        return {"ok": False, "error": f"Script not found: extract_{name}.py"}
+
+    with open(script_path) as f:
+        content = f.read()
+
+    # Find existing clip names to avoid duplicates
+    existing = set()
+    pattern = r'\("([^"]+)",\s*(\d+),\s*"([^"]+)",\s*(\d+)\)'
+    for match in re.finditer(pattern, content):
+        existing.add(match.group(1))
+
+    # Build new clip lines
+    added = 0
+    new_lines = []
+    for clip_name, ts, quote, dur in new_clips:
+        if clip_name in existing:
+            continue
+        safe_quote = quote.replace('"', '\\"')
+        new_lines.append(f'    ("{clip_name}", {ts}, "{safe_quote}", {dur}),')
+        added += 1
+
+    if not new_lines:
+        return {"ok": True, "added": 0, "message": "All clips already exist"}
+
+    # Insert before the closing bracket of CLIPS
+    # Find the CLIPS = [ ... ] block and insert before the last ]
+    insert_text = "\n".join(new_lines) + "\n"
+
+    # Find the ']' that closes CLIPS
+    clips_start = content.find("CLIPS = [")
+    if clips_start < 0:
+        return {"ok": False, "error": "Could not find CLIPS = [ in script"}
+
+    # Find matching close bracket
+    bracket_depth = 0
+    close_pos = None
+    for i in range(clips_start, len(content)):
+        if content[i] == '[':
+            bracket_depth += 1
+        elif content[i] == ']':
+            bracket_depth -= 1
+            if bracket_depth == 0:
+                close_pos = i
+                break
+
+    if close_pos is None:
+        return {"ok": False, "error": "Could not find closing ] for CLIPS"}
+
+    # Insert new lines before the closing ]
+    new_content = content[:close_pos] + insert_text + content[close_pos:]
+
+    with open(script_path, "w") as f:
+        f.write(new_content)
+
+    log.info("Added %d clips to %s", added, script_path)
+    return {"ok": True, "added": added}
+
+
+def remove_clip_from_script(name, clip_name):
+    """Remove a clip from an extraction script.
+
+    Returns:
+        dict with 'ok' or 'error'
+    """
+    script_path = os.path.join(EXTRACTION_DIR, f"extract_{name}.py")
+    if not os.path.exists(script_path):
+        return {"ok": False, "error": f"Script not found: extract_{name}.py"}
+
+    with open(script_path) as f:
+        content = f.read()
+
+    # Find and remove the line for this clip
+    pattern = rf'\s*\("{re.escape(clip_name)}",\s*\d+,\s*"[^"]*",\s*\d+\),?\n?'
+    new_content, count = re.subn(pattern, "\n", content)
+
+    if count == 0:
+        return {"ok": False, "error": f"Clip '{clip_name}' not found in script"}
+
+    with open(script_path, "w") as f:
+        f.write(new_content)
+
+    return {"ok": True}
+
+
+def slugify(text):
+    """Convert text to a clean slug for clip/movie names."""
+    text = text.lower().strip()
+    text = re.sub(r'[^a-z0-9\s_]', '', text)
+    text = re.sub(r'\s+', '_', text)
+    text = re.sub(r'_+', '_', text)
+    return text.strip('_')
 
 
 def get_all_scripts():

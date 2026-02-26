@@ -228,6 +228,114 @@ elif page == "Extraction Control":
                 with st.expander("Console log (last 30 lines)"):
                     st.code(log_text, language="text")
 
+    # ---- Add Movie / Add Clips section ----
+    st.markdown("---")
+    st.subheader("Add Movie")
+
+    add_tab1, add_tab2 = st.tabs(["New Movie", "Add Clips to Existing"])
+
+    with add_tab1:
+        # ---- New Movie ----
+        acol1, acol2 = st.columns(2)
+        with acol1:
+            new_movie_name = st.text_input("Movie slug", placeholder="baseketball", help="Lowercase, no spaces (e.g. 'baseketball', 'spacejam')")
+        with acol2:
+            new_movie_title = st.text_input("Display title", placeholder="BASEketball (1998)")
+
+        # MKV finder
+        mkv_search = st.text_input("Search D-drive for MKV", placeholder="Type movie name to search...", key="mkv_search")
+        mkv_path_manual = ""
+        if mkv_search:
+            mkv_results = extraction.find_mkv_files(mkv_search)
+            if mkv_results:
+                mkv_options = [f"{r['dir_name']} — {r['size_gb']}GB" for r in mkv_results]
+                mkv_choice = st.selectbox("Select MKV", mkv_options, key="mkv_select")
+                idx = mkv_options.index(mkv_choice)
+                mkv_path_manual = mkv_results[idx]["mkv_path"]
+                st.caption(f"`{mkv_path_manual}`")
+            else:
+                st.info(f"No MKV found matching '{mkv_search}' — you can enter the path manually below or add via Radarr")
+
+        mkv_path_override = st.text_input("MKV path (manual override)", value=mkv_path_manual, key="mkv_path_manual",
+                                          help="Full path to MKV file. Leave empty to add later.")
+        audio_stream = st.text_input("Audio stream", value="0:1", help="ffmpeg audio stream index")
+
+        # Quotes textarea — paste multiple at once
+        st.caption("Paste initial quotes (one per line): `clip_name | timestamp_seconds | quote text | duration`")
+        st.caption("Example: `yippee_ki_yay | 3600 | Yippee-ki-yay, motherfucker. | 3`")
+        quotes_text = st.text_area("Quotes (optional — can add later)", height=150, key="new_movie_quotes",
+                                   placeholder="clip_name | timestamp | quote text | duration\nclip_name | timestamp | quote text | duration")
+
+        if st.button("Create Movie", type="primary", key="create_movie_btn"):
+            if not new_movie_name:
+                st.error("Movie slug is required")
+            elif not new_movie_title:
+                st.error("Display title is required")
+            else:
+                slug = extraction.slugify(new_movie_name)
+                mkv = mkv_path_override or f"/Volumes/D-drive-music/Movies/{new_movie_title}/{new_movie_title} Remux-1080p.mkv"
+
+                # Parse quotes
+                clips = []
+                if quotes_text.strip():
+                    for line in quotes_text.strip().split("\n"):
+                        parts = [p.strip() for p in line.split("|")]
+                        if len(parts) >= 4:
+                            try:
+                                clips.append((
+                                    extraction.slugify(parts[0]),
+                                    int(parts[1]),
+                                    parts[2],
+                                    int(parts[3]),
+                                ))
+                            except ValueError:
+                                st.warning(f"Skipping invalid line: {line}")
+
+                result = extraction.create_movie_script(slug, new_movie_title, mkv, audio_stream, clips or None)
+                if result.get("ok"):
+                    st.success(f"Created extract_{slug}.py with {len(clips)} clips!")
+                    st.rerun()
+                else:
+                    st.error(result.get("error", "Unknown error"))
+
+    with add_tab2:
+        # ---- Add Clips to Existing ----
+        existing_names = [s["name"] for s in scripts]
+        if not existing_names:
+            st.info("No movies yet. Create one in the 'New Movie' tab first.")
+        else:
+            target_movie = st.selectbox("Movie", existing_names, key="add_clips_movie")
+            st.caption("Add quotes (one per line): `clip_name | timestamp_seconds | quote text | duration`")
+            add_quotes_text = st.text_area("New quotes", height=150, key="add_clips_quotes",
+                                           placeholder="clip_name | timestamp | quote text | duration")
+
+            acol1, acol2 = st.columns(2)
+            with acol1:
+                if st.button("Add Clips", type="primary", key="add_clips_btn"):
+                    if not add_quotes_text.strip():
+                        st.error("Enter at least one quote")
+                    else:
+                        clips = []
+                        for line in add_quotes_text.strip().split("\n"):
+                            parts = [p.strip() for p in line.split("|")]
+                            if len(parts) >= 4:
+                                try:
+                                    clips.append((
+                                        extraction.slugify(parts[0]),
+                                        int(parts[1]),
+                                        parts[2],
+                                        int(parts[3]),
+                                    ))
+                                except ValueError:
+                                    st.warning(f"Skipping invalid line: {line}")
+                        if clips:
+                            result = extraction.add_clips_to_script(target_movie, clips)
+                            if result.get("ok"):
+                                st.success(f"Added {result['added']} clips to {target_movie}")
+                                st.rerun()
+                            else:
+                                st.error(result.get("error", "Unknown error"))
+
 
 # ============================================================
 # PAGE: Clip Review
