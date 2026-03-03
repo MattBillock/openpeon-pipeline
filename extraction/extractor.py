@@ -23,9 +23,9 @@ v3 changes:
 Usage from extraction scripts:
     from extractor import run_extraction
     run_extraction(
-        movie_name="whiplash",
-        mkv_path="/Volumes/D-drive-music/Movies/Whiplash (2014)/...",
-        audio_stream="0:2",
+        movie_name="mymovie",
+        mkv_path="/path/to/movie.mkv",
+        audio_stream="0:1",
         clips=[("filename", timestamp, "expected quote", duration), ...],
         targets=sys.argv[1:],  # optional CLI filter
     )
@@ -44,8 +44,9 @@ from difflib import SequenceMatcher
 # Suppress FP16 warning on CPU
 warnings.filterwarnings("ignore", message="FP16 is not supported on CPU")
 
-WHISPER_PYTHON = "/opt/homebrew/Cellar/openai-whisper/20250625_3/libexec/bin/python3"
-BASE_DIR = os.path.expanduser("~/Development/AIOutput/openpeon/extraction")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
+BASE_DIR = os.path.join(PROJECT_ROOT, "extraction")
 
 # Ensure homebrew binaries are findable
 FFMPEG = "/opt/homebrew/bin/ffmpeg"
@@ -73,6 +74,27 @@ def _normalize_text(text):
     text = text.lower()
     text = re.sub(r"[^\w\s]", "", text)
     return " ".join(text.split())
+
+
+def filter_low_confidence_words(words):
+    """Filter out words that are likely hallucinated or non-speech audio.
+
+    Whisper hallucinates words over music/silence — these have low probability
+    and high no_speech_prob. Old transcripts lacking these fields pass through
+    unchanged via safe defaults.
+
+    Returns filtered list of word dicts.
+    """
+    filtered = []
+    for w in words:
+        prob = w.get("probability", 1.0)
+        nsp = w.get("no_speech_prob", 0.0)
+        if prob < 0.25:
+            continue  # likely hallucinated
+        if nsp > 0.60:
+            continue  # likely music/silence
+        filtered.append(w)
+    return filtered
 
 
 def extract_window(mkv_path, audio_stream, timestamp_s, window_s=60):
@@ -106,7 +128,7 @@ def _get_whisper_model():
             _whisper_model = whisper.load_model("small")
             print("  Whisper model loaded.")
         except ImportError:
-            print("  ERROR: whisper not available. Run with WHISPER_PYTHON.")
+            print("  ERROR: whisper not available. Run with project venv: .venv/bin/python3")
             return None
     return _whisper_model
 
@@ -124,11 +146,14 @@ def whisper_transcribe(audio_path, is_mp3=False):
         result = model.transcribe(audio_path, language="en", word_timestamps=True)
         words = []
         for seg in result.get("segments", []):
+            seg_nsp = seg.get("no_speech_prob", 0.0)
             for word in seg.get("words", []):
                 words.append({
                     "word": word["word"].strip(),
                     "start": word["start"],
                     "end": word["end"],
+                    "probability": round(word.get("probability", 1.0), 4),
+                    "no_speech_prob": round(seg_nsp, 4),
                 })
         full_text = result.get("text", "").strip()
         return {"words": words, "text": full_text}
@@ -189,21 +214,29 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
 
     print(f"  Movie duration: {duration:.0f}s ({duration/60:.0f}min)")
 
-    # Phase 1: Extract full audio track to a single WAV file
-    # This is one ffmpeg pass — much faster than seeking per-chunk in large MKVs
-    full_wav = os.path.join(output_dir, "full_audio.wav")
-    if os.path.exists(full_wav):
-        print(f"  Using existing full audio WAV: {full_wav}")
+    # Phase 1: Extract full audio track to a compressed OGG file
+    # OGG is ~10x smaller than WAV (20-50MB vs 200-500MB), and Whisper accepts it natively.
+    # This avoids starving macOS audio with massive temp files.
+    full_audio = os.path.join(output_dir, "full_audio.ogg")
+    full_wav_legacy = os.path.join(output_dir, "full_audio.wav")
+
+    # Backward compat: use existing WAV if present (from previous runs)
+    if os.path.exists(full_wav_legacy):
+        print(f"  Using existing full audio WAV: {full_wav_legacy}")
+        full_audio = full_wav_legacy
+    elif os.path.exists(full_audio):
+        print(f"  Using existing full audio OGG: {full_audio}")
     else:
-        print(f"  Extracting full audio track to WAV (this may take a few minutes)...")
+        print(f"  Extracting full audio track to OGG (this may take a few minutes)...")
         cmd = [
             FFMPEG, "-y",
             "-i", mkv_path,
             "-map", audio_stream,
             "-ac", "1",
             "-ar", "16000",
-            "-acodec", "pcm_s16le",
-            full_wav,
+            "-acodec", "libvorbis",
+            "-q:a", "4",
+            full_audio,
         ]
         try:
             result = subprocess.run(cmd, capture_output=True, timeout=1800)  # 30min timeout
@@ -211,12 +244,12 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
                 stderr = result.stderr.decode("utf-8", errors="replace")[:500]
                 print(f"  ERROR: ffmpeg audio extraction failed: {stderr}")
                 return None
-            wav_size = os.path.getsize(full_wav) / (1024 * 1024)
-            print(f"  Full audio extracted: {wav_size:.0f}MB")
+            audio_size = os.path.getsize(full_audio) / (1024 * 1024)
+            print(f"  Full audio extracted: {audio_size:.0f}MB")
         except subprocess.TimeoutExpired:
             print(f"  ERROR: ffmpeg audio extraction timed out (30 min limit)")
             try:
-                os.unlink(full_wav)
+                os.unlink(full_audio)
             except OSError:
                 pass
             return None
@@ -238,12 +271,12 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
         print(f"  Chunk {chunk_idx + 1}/{num_chunks}: {chunk_start:.0f}s - {chunk_end:.0f}s "
               f"({chunk_start/60:.0f}min - {chunk_end/60:.0f}min)...")
 
-        # Extract chunk from the local WAV (fast — no MKV seeking)
+        # Extract chunk from the local audio file (fast — no MKV seeking)
         tmp_chunk = tempfile.mktemp(suffix=".wav")
         cmd = [
             FFMPEG, "-y",
             "-ss", str(chunk_start),
-            "-i", full_wav,
+            "-i", full_audio,
             "-t", str(chunk_len),
             "-acodec", "pcm_s16le",
             tmp_chunk,
@@ -258,11 +291,14 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
             result = model.transcribe(tmp_chunk, language="en", word_timestamps=True)
             chunk_words = 0
             for seg in result.get("segments", []):
+                seg_nsp = seg.get("no_speech_prob", 0.0)
                 for word in seg.get("words", []):
                     all_words.append({
                         "word": word["word"].strip(),
                         "start": round(word["start"] + chunk_start, 3),
                         "end": round(word["end"] + chunk_start, 3),
+                        "probability": round(word.get("probability", 1.0), 4),
+                        "no_speech_prob": round(seg_nsp, 4),
                     })
                     chunk_words += 1
             chunk_text = result.get("text", "").strip()
@@ -277,10 +313,10 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
             except OSError:
                 pass
 
-    # Clean up full WAV (large file, not needed after transcription)
+    # Clean up full audio file (not needed after transcription)
     try:
-        os.unlink(full_wav)
-        print(f"  Cleaned up full_audio.wav")
+        os.unlink(full_audio)
+        print(f"  Cleaned up {os.path.basename(full_audio)}")
     except OSError:
         pass
 
@@ -305,27 +341,122 @@ def transcribe_full_movie(mkv_path, audio_stream, output_dir):
     return all_words
 
 
+def _extract_and_verify(mkv_path, audio_stream, output_path, start, end, quote, log_entry):
+    """Extract a clip at the given timestamps and run STT verification.
+
+    Shared by both transcript-search and manual-override paths.
+    Returns: "verified", "review", "rejected", or "failed"
+    """
+    actual_start = max(0, start - 0.3)
+    duration = (end - start) + 0.6
+    duration = max(1.0, min(duration, 10.0))
+
+    cmd = [
+        FFMPEG, "-y",
+        "-ss", str(actual_start),
+        "-i", mkv_path,
+        "-t", str(duration),
+        "-map", audio_stream,
+        "-vn",
+        "-acodec", "libmp3lame",
+        "-q:a", "2",
+        "-ac", "1",
+        output_path,
+    ]
+    result = subprocess.run(cmd, capture_output=True, timeout=120)
+    if result.returncode != 0:
+        print(f"    -> ffmpeg clip extraction failed")
+        return "failed"
+
+    # POST-EXTRACTION VERIFICATION
+    print(f"  POST-VERIFY: Re-running STT on extracted clip...")
+    verify = verify_extracted_clip(output_path, quote)
+    verify_score = verify["score"]
+    verify_status = verify["status"]
+    verify_heard = verify["heard"]
+
+    log_entry["pre_match_score"] = log_entry.get("pre_match_score", 0)
+    log_entry["found_at"] = round(start, 1)
+    log_entry["verify_score"] = verify_score
+    log_entry["verify_heard"] = verify_heard
+    log_entry["verify_status"] = verify_status
+
+    if verify_status == "rejected":
+        print(f"  POST-VERIFY FAILED: score={verify_score:.3f}")
+        print(f"    Expected: \"{quote}\"")
+        print(f"    Heard:    \"{verify_heard}\"")
+        try:
+            os.unlink(output_path)
+        except OSError:
+            pass
+        return "rejected"
+
+    if verify_status == "review":
+        print(f"  POST-VERIFY MARGINAL: score={verify_score:.3f}")
+        print(f"    Expected: \"{quote}\"")
+        print(f"    Heard:    \"{verify_heard}\"")
+        return "review"
+
+    print(f"  POST-VERIFY PASSED: score={verify_score:.3f}")
+    print(f"    Expected: \"{quote}\"")
+    print(f"    Heard:    \"{verify_heard}\"")
+    return "verified"
+
+
 def process_clip_from_transcript(mkv_path, audio_stream, output_dir, filename,
-                                  quote, expected_duration, log_entry, full_words):
+                                  quote, expected_duration, log_entry, full_words,
+                                  override_timestamp=None):
     """Process a single clip using the full-movie transcript.
 
     Searches the full transcript for the best match, extracts the clip,
     and verifies it.
+
+    Args:
+        override_timestamp: If set, skip transcript search and extract directly
+            at this timestamp (seconds). Used for manual corrections.
 
     Returns: "verified", "review", "rejected", or "failed"
     """
     print(f"\n{'='*60}")
     print(f"  CLIP: {filename}")
     print(f"  QUOTE: \"{quote}\"")
+    if override_timestamp is not None:
+        print(f"  OVERRIDE: extracting at {override_timestamp}s")
     print(f"{'='*60}")
 
     output_path = os.path.join(output_dir, filename + ".mp3")
 
-    # Search full transcript
-    match = find_quote(full_words, quote)
+    # Manual timestamp override — skip transcript search entirely
+    if override_timestamp is not None:
+        start = float(override_timestamp)
+        end = start + max(1.0, min(expected_duration, 10.0))
+        log_entry["attempts"].append({
+            "method": "manual_override",
+            "timestamp": round(start, 1),
+        })
+        log_entry["pre_match_score"] = 0
+        log_entry["pre_match_text"] = "(manual override)"
+        return _extract_and_verify(mkv_path, audio_stream, output_path,
+                                   start, end, quote, log_entry)
+
+    # Filter out hallucinated/music words before searching
+    filtered_words = filter_low_confidence_words(full_words)
+
+    # Read exclude_positions from log_entry (accumulated from previous retries)
+    exclude_positions = log_entry.get("exclude_positions", [])
+
+    # Search full transcript (with exclusions if retrying)
+    match = find_quote(filtered_words, quote, exclude_positions=exclude_positions)
+    if match is None and exclude_positions:
+        # Fall back to searching without exclusions
+        print(f"    -> No match with {len(exclude_positions)} exclusion(s), trying without...")
+        match = find_quote(filtered_words, quote)
+        if match:
+            print(f"    -> WARNING: Only found match in excluded region")
+
     if match is None:
         # Try with a lower threshold to at least get candidates
-        match_loose = find_quote(full_words, quote, min_score=REVIEW_SCORE)
+        match_loose = find_quote(filtered_words, quote, min_score=REVIEW_SCORE)
         if match_loose:
             start, end, score, matched_text = match_loose
             print(f"    -> Loose match: score={score:.3f} at {start:.1f}s")
@@ -357,67 +488,23 @@ def process_clip_from_transcript(mkv_path, audio_stream, output_dir, filename,
         "matched_text": matched_text,
         "timestamp": round(start, 1),
     })
-
-    # Extract the clip directly from the MKV at the found timestamp
-    actual_start = max(0, start - 0.3)
-    duration = (end - start) + 0.6
-    duration = max(1.0, min(duration, 10.0))
-
-    cmd = [
-        FFMPEG, "-y",
-        "-ss", str(actual_start),
-        "-i", mkv_path,
-        "-t", str(duration),
-        "-map", audio_stream,
-        "-vn",
-        "-acodec", "libmp3lame",
-        "-q:a", "2",
-        "-ac", "1",
-        output_path,
-    ]
-    result = subprocess.run(cmd, capture_output=True, timeout=120)
-    if result.returncode != 0:
-        print(f"    -> ffmpeg clip extraction failed")
-        return "failed"
-
-    # POST-EXTRACTION VERIFICATION
-    print(f"  POST-VERIFY: Re-running STT on extracted clip...")
-    verify = verify_extracted_clip(output_path, quote)
-    verify_score = verify["score"]
-    verify_status = verify["status"]
-    verify_heard = verify["heard"]
-
     log_entry["pre_match_score"] = round(score, 3)
     log_entry["pre_match_text"] = matched_text
-    log_entry["found_at"] = round(start, 1)
-    log_entry["verify_score"] = verify_score
-    log_entry["verify_heard"] = verify_heard
-    log_entry["verify_status"] = verify_status
 
-    if verify_status == "rejected":
-        print(f"  POST-VERIFY FAILED: score={verify_score:.3f}")
-        print(f"    Expected: \"{quote}\"")
-        print(f"    Heard:    \"{verify_heard}\"")
-        try:
-            os.unlink(output_path)
-        except OSError:
-            pass
-        return "rejected"
-
-    if verify_status == "review":
-        print(f"  POST-VERIFY MARGINAL: score={verify_score:.3f}")
-        print(f"    Expected: \"{quote}\"")
-        print(f"    Heard:    \"{verify_heard}\"")
-        return "review"
-
-    print(f"  POST-VERIFY PASSED: score={verify_score:.3f}")
-    print(f"    Expected: \"{quote}\"")
-    print(f"    Heard:    \"{verify_heard}\"")
-    return "verified"
+    return _extract_and_verify(mkv_path, audio_stream, output_path,
+                               start, end, quote, log_entry)
 
 
-def find_quote(words, expected_quote, min_score=MIN_MATCH_SCORE):
+def find_quote(words, expected_quote, min_score=MIN_MATCH_SCORE, exclude_positions=None):
     """Find the best match for the expected quote in the transcription.
+
+    Args:
+        words: list of word dicts with start/end times
+        expected_quote: the quote text to search for
+        min_score: minimum fuzzy match score
+        exclude_positions: list of timestamps (seconds) to skip. A 2-second
+            buffer around each position is excluded, preventing retry loops
+            from finding the same wrong match.
 
     Returns (start_time, end_time, score, matched_text) or None.
     """
@@ -429,12 +516,25 @@ def find_quote(words, expected_quote, min_score=MIN_MATCH_SCORE):
     word_texts = [_normalize_text(w["word"]) for w in words]
     expected_joined = " ".join(expected_words)
 
+    # Build exclusion check
+    _exclude = exclude_positions or []
+    EXCLUDE_BUFFER = 2.0
+
+    def _is_excluded(start_time):
+        for pos in _exclude:
+            if abs(start_time - pos) < EXCLUDE_BUFFER:
+                return True
+        return False
+
     best_score = 0
     best_match = None
     best_text = ""
 
     for window in range(max(1, n - 2), n + 4):
         for i in range(len(word_texts) - window + 1):
+            # Skip regions near excluded positions
+            if _exclude and _is_excluded(words[i]["start"]):
+                continue
             candidate = " ".join(word_texts[i:i + window])
             score = SequenceMatcher(None, expected_joined, candidate).ratio()
             if score > best_score:
@@ -545,7 +645,8 @@ def process_clip(mkv_path, audio_stream, output_dir, filename, timestamp,
             })
             continue
 
-        words = data.get("words", [])
+        raw_words = data.get("words", [])
+        words = filter_low_confidence_words(raw_words)
         full_text = data.get("text", "")
         if not words:
             print(f"    -> No words detected")
@@ -629,7 +730,7 @@ def run_extraction(movie_name, mkv_path, audio_stream, clips, targets=None,
     """Main extraction entry point.
 
     Args:
-        movie_name: e.g. "whiplash"
+        movie_name: e.g. "mymovie"
         mkv_path: path to MKV file
         audio_stream: e.g. "0:2"
         clips: list of (filename, timestamp, quote, duration) tuples
@@ -671,6 +772,18 @@ def run_extraction(movie_name, mkv_path, audio_stream, clips, targets=None,
     print(f"  TIME: {datetime.now().isoformat()}")
     print(f"{'#'*60}")
 
+    # Load manual overrides if present
+    overrides_path = os.path.join(output_dir, "overrides.json")
+    overrides = {}
+    if os.path.exists(overrides_path):
+        try:
+            with open(overrides_path) as f:
+                overrides = json.load(f)
+            if overrides:
+                print(f"  Loaded {len(overrides)} manual override(s) from overrides.json")
+        except Exception as e:
+            print(f"  WARNING: Failed to load overrides.json: {e}")
+
     # Full-movie mode: transcribe entire movie first
     full_words = None
     if not windowed:
@@ -690,7 +803,8 @@ def run_extraction(movie_name, mkv_path, audio_stream, clips, targets=None,
             results["verified"].append(filename)
             continue
 
-        # Create log entry
+        # Create log entry — carry forward exclude_positions from previous attempts
+        existing_excludes = existing.get("exclude_positions", [])
         log_entry = {
             "quote": quote,
             "timestamp": timestamp,
@@ -698,11 +812,17 @@ def run_extraction(movie_name, mkv_path, audio_stream, clips, targets=None,
             "attempts": [],
             "extracted_at": datetime.now().isoformat(),
         }
+        if existing_excludes:
+            log_entry["exclude_positions"] = existing_excludes
+
+        # Check for manual timestamp override
+        override_ts = overrides.get(filename)
 
         if full_words and not windowed:
             status = process_clip_from_transcript(
                 mkv_path, audio_stream, output_dir,
-                filename, quote, duration, log_entry, full_words
+                filename, quote, duration, log_entry, full_words,
+                override_timestamp=override_ts,
             )
         else:
             status = process_clip(

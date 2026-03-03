@@ -3,12 +3,34 @@ __pycache__/
 *.pyc
 .venv/
 
-# Extraction runtime
+# Per-movie extraction scripts (user-specific, contain quotes)
+extraction/extract_*.py
+
+# Extraction data (audio, transcripts, logs)
+extraction/**/*.mp3
+extraction/**/*.wav
+extraction/**/*.ogg
+extraction/**/full_transcript.json
+extraction/**/full_audio.*
+extraction/**/extraction_log.json
+extraction/**/review.json
+extraction/**/overrides.json
 extraction/*/extraction.log
 extraction/*/unverified/
+extraction/extraction_runner.log
 
 # Dashboard working data
 drafts/
+
+# Runtime settings
+.openpeon_settings.json
+
+# Pack themes (user-specific icon/color config)
+dashboard/pack_themes.json
+
+# Environment / secrets
+.env
+*.env
 
 # OS
 .DS_Store

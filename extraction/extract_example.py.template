@@ -1,0 +1,29 @@
+#!/usr/bin/env python3
+"""Extract audio clips from a movie file.
+
+Copy this template and rename to extract_<moviename>.py, then fill in:
+  - MKV: path to your movie file
+  - AUDIO_STREAM: the audio stream index (check with: ffprobe -i movie.mkv)
+  - CLIPS: list of (filename, approx_timestamp_seconds, "expected quote text", duration_seconds)
+
+Run with:
+  .venv/bin/python3 extraction/extract_<moviename>.py
+  .venv/bin/python3 extraction/extract_<moviename>.py clip_name  # single clip
+"""
+import sys
+
+sys.path.insert(0, __import__("os").path.dirname(__import__("os").path.abspath(__file__)))
+from extractor import run_extraction
+
+MKV = "/path/to/your/movie.mkv"
+AUDIO_STREAM = "0:1"  # Check with: ffprobe -i movie.mkv
+
+CLIPS = [
+    # (filename, approx_timestamp_seconds, "expected quote text", duration_seconds),
+    ("example_greeting", 600, "Here is the quote text", 3),
+    ("example_farewell", 1200, "Another quote from the movie", 2),
+]
+
+if __name__ == "__main__":
+    targets = sys.argv[1:] or None
+    run_extraction("example", MKV, AUDIO_STREAM, CLIPS, targets=targets)

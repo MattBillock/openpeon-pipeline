@@ -29,7 +29,8 @@ def _get_config():
 
 def _api_get(endpoint):
     cfg = _get_config()
-    url = f"{cfg['url']}/api/v3/{endpoint}?apikey={cfg['api_key']}"
+    sep = "&" if "?" in endpoint else "?"
+    url = f"{cfg['url']}/api/v3/{endpoint}{sep}apikey={cfg['api_key']}"
     try:
         req = urllib.request.Request(url)
         with urllib.request.urlopen(req, timeout=10) as r:

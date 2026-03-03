@@ -7,14 +7,17 @@
 #   ./sync_from_mini.sh spaceballs   # Sync specific movie
 set -uo pipefail
 
-LOCAL_DIR="$HOME/Development/AIOutput/openpeon/extraction"
-REMOTE="mini:~/Development/AIOutput/openpeon/extraction"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LOCAL_DIR="$HOME/dev/openpeon/extraction"
+REMOTE="mini:~/dev/openpeon/extraction"
 
-ALL_MOVIES=(
-  afewgoodmen airplane diehard fifthelement fightclub
-  fullmetaljacket glengarry goodfellas pulpfiction
-  spaceballs tommyboy tuckerdale whiplash
-)
+# Auto-discover movies from extraction scripts
+ALL_MOVIES=()
+for script in "$SCRIPT_DIR"/extract_*.py; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script" | sed 's/extract_//;s/\.py//')
+    ALL_MOVIES+=("$name")
+done
 
 if [ $# -gt 0 ]; then
   MOVIES=("$@")

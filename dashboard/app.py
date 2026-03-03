@@ -4,6 +4,8 @@ Self-sufficient management UI for the OpenPeon movie quote extraction pipeline.
 Handles extraction control, STT verification review, pack building, and monitoring.
 """
 import logging
+import re
+import subprocess
 import streamlit as st
 import os
 import sys
@@ -19,9 +21,15 @@ logging.basicConfig(
 sys.path.insert(0, os.path.dirname(__file__))
 
 import extraction
+import health
 import radarr_client
+import media_client
 import pack_builder
 import icon_generator
+import quote_generator
+
+# Surface quote generation failures in Streamlit terminal
+logging.getLogger("quote_generator").setLevel(logging.INFO)
 
 st.set_page_config(
     page_title="OpenPeon Pipeline",
@@ -50,15 +58,26 @@ st.markdown("""<style>
 
 # --- Sidebar ---
 st.sidebar.title("OpenPeon Pipeline")
-page = st.sidebar.radio("Navigate", [
+# Support "Go fix" navigation from Things to Do
+if "nav_page" in st.session_state:
+    _default_page = st.session_state.pop("nav_page")
+else:
+    _default_page = None
+
+_pages = [
     "Overview",
+    "Things to Do",
     "Extraction Control",
     "Clip Review",
     "Pack Review",
     "Pack Designer",
     "Pack Status",
-    "Radarr",
-])
+    "Media Library",
+]
+page = st.sidebar.radio(
+    "Navigate", _pages,
+    index=_pages.index(_default_page) if _default_page in _pages else 0,
+)
 
 if st.sidebar.button("Refresh"):
     st.rerun()
@@ -79,13 +98,259 @@ st.sidebar.metric("STT Verified", total_verified)
 st.sidebar.metric("Approved", total_approved)
 
 st.sidebar.markdown("---")
+
+# Sidebar health indicator
+_health = health.check_all()
+if _health["all_ok"]:
+    st.sidebar.success("Systems OK")
+else:
+    st.sidebar.error(f"{_health['fail_count']} system issue{'s' if _health['fail_count'] != 1 else ''}")
+
 st.sidebar.caption("Use Refresh button to update")
+
+
+def _nav_button(label, target_page, key):
+    """Render a button that navigates to a different page."""
+    if st.button(label, key=key):
+        st.session_state["nav_page"] = target_page
+        st.rerun()
+
+
+# ============================================================
+# PAGE: Things to Do
+# ============================================================
+if page == "Things to Do":
+    st.title("Things to Do")
+    st.caption("Actionable items across the entire pipeline, sorted by priority.")
+
+    # --- Data gathering ---
+    diagnoses = {s["name"]: health.diagnose_movie(s) for s in scripts}
+    pack_summaries = pack_builder.get_all_pack_review_summary()
+    pack_details_cache = {}
+    for ps in pack_summaries:
+        pack_details_cache[ps["name"]] = pack_builder.get_pack_details(ps["name"])
+    unpublished = pack_builder.get_unpublished_packs()
+    registry_status = pack_builder.get_registry_status()
+
+    # --- Build to-do items ---
+    items_p1 = []  # Blockers
+    items_p2 = []  # Important
+    items_p3 = []  # Nice to have
+
+    # P1: System health failures
+    for chk in _health["checks"]:
+        if not chk["ok"]:
+            items_p1.append({
+                "label": f"System: {chk['name']} — {chk['message']}",
+                "detail": chk["fix"],
+                "severity": "error",
+                "nav": None,
+            })
+
+    # P1: Red-severity movies
+    for s in scripts:
+        diag = diagnoses[s["name"]]
+        if diag["severity"] == "red":
+            items_p1.append({
+                "label": f"{s['name']} — {diag['summary']}",
+                "detail": "; ".join(diag["fixes"][:2]) if diag["fixes"] else "",
+                "severity": "error",
+                "nav": "Extraction Control",
+            })
+
+    # P1: Packs with missing sound files
+    for ps in pack_summaries:
+        details = pack_details_cache.get(ps["name"])
+        if details:
+            missing_files = 0
+            for cat, sounds in details["categories"].items():
+                missing_files += sum(1 for s_item in sounds if not s_item["exists"])
+            if missing_files:
+                items_p1.append({
+                    "label": f"Pack '{ps['display_name']}' — {missing_files} missing sound file(s)",
+                    "detail": "Sound files referenced in manifest but not on disk.",
+                    "severity": "error",
+                    "nav": "Pack Review",
+                })
+
+    # P2: Unreviewed clips per movie
+    movies_with_unreviewed = [(s["name"], s["unreviewed"]) for s in scripts if s["unreviewed"] > 0]
+    movies_with_unreviewed.sort(key=lambda x: x[1], reverse=True)
+    for name, count in movies_with_unreviewed:
+        items_p2.append({
+            "label": f"{name} — {count} clip(s) to review",
+            "detail": "Listen and approve/reject extracted clips.",
+            "severity": "warning",
+            "nav": "Clip Review",
+        })
+
+    # P2: Orange-severity movies (incomplete extraction, not running)
+    for s in scripts:
+        diag = diagnoses[s["name"]]
+        if diag["severity"] == "orange" and not s["is_running"]:
+            items_p2.append({
+                "label": f"{s['name']} — {diag['summary']}",
+                "detail": "; ".join(diag["fixes"][:2]) if diag["fixes"] else "",
+                "severity": "warning",
+                "nav": "Extraction Control",
+            })
+
+    # P2: Packs with empty CESP categories
+    for ps in pack_summaries:
+        details = pack_details_cache.get(ps["name"])
+        if details:
+            empty_cats = [c for c in pack_builder.CATEGORIES
+                         if not details["categories"].get(c)]
+            if empty_cats:
+                items_p2.append({
+                    "label": f"Pack '{ps['display_name']}' — {len(empty_cats)} empty category(ies)",
+                    "detail": f"Missing: {', '.join(empty_cats)}",
+                    "severity": "warning",
+                    "nav": "Pack Review",
+                })
+
+    # P2: Packs with flagged sounds
+    for ps in pack_summaries:
+        if ps["flagged"] > 0:
+            items_p2.append({
+                "label": f"Pack '{ps['display_name']}' — {ps['flagged']} flagged sound(s)",
+                "detail": "Sounds marked as needing fix or update.",
+                "severity": "warning",
+                "nav": "Pack Review",
+            })
+
+    # P2: Packs with unreviewed sounds
+    for ps in pack_summaries:
+        unrev = ps["unreviewed"]
+        if unrev > 0:
+            items_p2.append({
+                "label": f"Pack '{ps['display_name']}' — {unrev} unreviewed sound(s)",
+                "detail": "Listen to each sound and mark OK or flag.",
+                "severity": "warning",
+                "nav": "Pack Review",
+            })
+
+    # P2: Movies with approved clips but no pack built
+    published_packs = pack_builder.get_published_packs()
+    published_pack_names = {p["name"] for p in published_packs}
+    for s in scripts:
+        if s["approved"] > 0:
+            slug = s["name"]
+            # Check if any pack exists for this movie (approximate match)
+            has_pack = any(slug in pn for pn in published_pack_names)
+            if not has_pack:
+                items_p2.append({
+                    "label": f"{s['name']} — {s['approved']} approved clip(s), no pack built",
+                    "detail": "Go to Pack Designer to build a sound pack.",
+                    "severity": "warning",
+                    "nav": "Pack Designer",
+                })
+
+    # P2: Packs missing icons
+    for ps in pack_summaries:
+        if not ps["has_icon"]:
+            items_p2.append({
+                "label": f"Pack '{ps['display_name']}' — missing icon",
+                "detail": "Generate or upload a pack icon.",
+                "severity": "warning",
+                "nav": "Pack Review",
+            })
+
+    # P3: Unpublished packs
+    for pack in unpublished:
+        items_p3.append({
+            "label": f"Pack '{pack['display_name']}' — unpublished changes ({pack['files_changed']} file(s))",
+            "detail": "Commit and push to the registry.",
+            "severity": "info",
+            "nav": "Pack Designer",
+        })
+
+    # P3: Unregistered packs
+    for name, info in registry_status.items():
+        if not info["registered"]:
+            items_p3.append({
+                "label": f"Pack '{name}' — not registered in PeonPing registry",
+                "detail": "Create a PR to add this pack to the official index.",
+                "severity": "info",
+                "nav": "Pack Designer",
+            })
+
+    # P3: Approved clips missing category assignment
+    for s in scripts:
+        uncat = extraction.count_uncategorized_approved(s["name"])
+        if uncat > 0:
+            items_p3.append({
+                "label": f"{s['name']} — {uncat} approved clip(s) need category",
+                "detail": "Assign CESP categories in Clip Review.",
+                "severity": "info",
+                "nav": "Clip Review",
+            })
+
+    total_items = len(items_p1) + len(items_p2) + len(items_p3)
+
+    # --- Summary metrics ---
+    mcol1, mcol2, mcol3, mcol4 = st.columns(4)
+    mcol1.metric("Total Items", total_items)
+    mcol2.metric("Blockers", len(items_p1))
+    mcol3.metric("Important", len(items_p2))
+    mcol4.metric("Nice to Have", len(items_p3))
+
+    # --- Pipeline progress funnel ---
+    st.markdown("---")
+    st.subheader("Pipeline Progress")
+    total_movies = len(scripts)
+    movies_extracted = sum(1 for s in scripts if s["extracted_count"] > 0)
+    movies_with_approved_clips = sum(1 for s in scripts if s["approved"] > 0)
+    packs_built = len(published_packs)
+    packs_qad = sum(1 for ps in pack_summaries if ps["pack_status"] == "complete")
+    packs_registered = sum(1 for _, info in registry_status.items() if info["registered"])
+
+    funnel_cols = st.columns(6)
+    funnel_cols[0].metric("Movies", total_movies)
+    funnel_cols[1].metric("Extracted", movies_extracted)
+    funnel_cols[2].metric("Clips Approved", movies_with_approved_clips)
+    funnel_cols[3].metric("Packs Built", packs_built)
+    funnel_cols[4].metric("Packs QA'd", packs_qad)
+    funnel_cols[5].metric("Registered", packs_registered)
+
+    # --- Prioritized sections ---
+    st.markdown("---")
+
+    if items_p1:
+        st.subheader(f"Blockers ({len(items_p1)})")
+        for idx, item in enumerate(items_p1):
+            st.error(f"**{item['label']}**")
+            if item["detail"]:
+                st.caption(item["detail"])
+            if item["nav"]:
+                _nav_button("Go fix", item["nav"], key=f"p1_fix_{idx}")
+
+    if items_p2:
+        st.subheader(f"Important ({len(items_p2)})")
+        for idx, item in enumerate(items_p2):
+            st.warning(f"**{item['label']}**")
+            if item["detail"]:
+                st.caption(item["detail"])
+            if item["nav"]:
+                _nav_button("Go fix", item["nav"], key=f"p2_fix_{idx}")
+
+    if items_p3:
+        st.subheader(f"Nice to Have ({len(items_p3)})")
+        for idx, item in enumerate(items_p3):
+            st.info(f"**{item['label']}**")
+            if item["detail"]:
+                st.caption(item["detail"])
+            if item["nav"]:
+                _nav_button("Go fix", item["nav"], key=f"p3_fix_{idx}")
+
+    if total_items == 0:
+        st.success("Nothing to do! Pipeline is fully caught up.")
 
 
 # ============================================================
 # PAGE: Overview
 # ============================================================
-if page == "Overview":
+elif page == "Overview":
     st.title("Pipeline Overview")
 
     published = pack_builder.get_published_packs()
@@ -99,27 +364,41 @@ if page == "Overview":
 
     st.markdown("---")
 
-    # Extraction progress table
+    # Needs Attention section — problem movies at the top
+    _diagnoses = {s["name"]: health.diagnose_movie(s) for s in scripts}
+    _problem_movies = [s for s in scripts if _diagnoses[s["name"]]["severity"] == "red"]
+    _warning_movies = [s for s in scripts if _diagnoses[s["name"]]["severity"] == "orange"]
+
+    if _problem_movies or _warning_movies:
+        st.subheader("Needs Attention")
+        for s in _problem_movies:
+            diag = _diagnoses[s["name"]]
+            st.error(f"**{s['name']}** — {diag['summary']}")
+        for s in _warning_movies:
+            diag = _diagnoses[s["name"]]
+            st.warning(f"**{s['name']}** — {diag['summary']}")
+        st.markdown("---")
+
+    # Extraction progress table with diagnose_movie summaries
     st.subheader("Extraction Progress")
     for s in scripts:
-        if s["is_running"]:
-            icon = "🔄"
-        elif s["extracted_count"] >= s["total_clips"] and s["total_clips"] > 0:
-            icon = "✅"
-        elif s["extracted_count"] > 0:
-            icon = "⏸️"
-        else:
-            icon = "⬜"
-
+        diag = _diagnoses[s["name"]]
         pct = (s["extracted_count"] / s["total_clips"]) if s["total_clips"] > 0 else 0
 
         cols = st.columns([2, 3, 1, 1, 1, 1])
-        cols[0].markdown(f"{icon} **{s['name']}**")
+        severity = diag["severity"]
+        status_text = diag["summary"]
+        if severity == "red":
+            cols[0].markdown(f":red[**{s['name']}**]")
+        elif severity == "orange":
+            cols[0].markdown(f":orange[**{s['name']}**]")
+        else:
+            cols[0].markdown(f":green[**{s['name']}**]")
         cols[1].progress(min(pct, 1.0))
-        cols[2].caption(f"{s['extracted_count']}/{s['total_clips']}")
-        cols[3].caption(f"✅ {s['verified']}")
-        cols[4].caption(f"👁️ {s['needs_review']}")
-        cols[5].caption(f"👍 {s['approved']}")
+        cols[2].caption(status_text)
+        cols[3].caption(f"V:{s['verified']}")
+        cols[4].caption(f"R:{s['needs_review']}")
+        cols[5].caption(f"A:{s['approved']}")
 
     st.markdown("---")
 
@@ -141,18 +420,44 @@ if page == "Overview":
 elif page == "Extraction Control":
     st.title("Extraction Control")
 
-    # Batch actions
+    # --- Health + load banner ---
+    _ec_health = health.check_all()
+    _load_info = health.check_system_load()
+    if _ec_health["all_ok"] and _load_info["ok"]:
+        st.success("All systems ready")
+    else:
+        if not _ec_health["all_ok"]:
+            st.error(f"{_ec_health['fail_count']} issue{'s' if _ec_health['fail_count'] != 1 else ''} blocking extraction")
+            for chk in _ec_health["checks"]:
+                if not chk["ok"]:
+                    st.warning(f"**{chk['name']}**: {chk['message']}  \n{chk['fix']}")
+        if not _load_info["ok"]:
+            st.warning(f"**System load**: {_load_info['message']}")
+
+    # --- Queue-aware batch actions (Phase 5D) ---
     st.subheader("Batch Actions")
-    bcol1, bcol2, bcol3 = st.columns(3)
+    _running_count = sum(1 for s in scripts if s["is_running"])
+    _max_concurrent = extraction.get_max_concurrent()
+    _idle_incomplete = [s for s in scripts if not s["is_running"]
+                        and s["extracted_count"] < s["total_clips"]
+                        and s["total_clips"] > 0
+                        and (s["approved"] + s["rejected"]) < s["total_clips"]]
+
+    bcol1, bcol2, bcol3, bcol4 = st.columns([2, 1, 1, 1])
     with bcol1:
-        if st.button("Start ALL idle", type="primary"):
-            started = 0
-            for s in scripts:
-                if not s["is_running"] and s["extracted_count"] < s["total_clips"]:
-                    extraction.start_extraction(s["name"])
-                    started += 1
-            st.success(f"Started {started} extractions")
-            st.rerun()
+        if _running_count >= _max_concurrent:
+            st.info(f"{_running_count}/{_max_concurrent} slots in use. "
+                    f"{len(_idle_incomplete)} movie{'s' if len(_idle_incomplete) != 1 else ''} waiting.")
+        elif _idle_incomplete:
+            if st.button("Start next idle", type="primary"):
+                result = extraction.start_extraction(_idle_incomplete[0]["name"])
+                if "error" in result:
+                    st.error(result["error"])
+                else:
+                    st.success(f"Started {_idle_incomplete[0]['name']}")
+                    st.rerun()
+        else:
+            st.caption("No idle movies to start")
     with bcol2:
         if st.button("Stop ALL"):
             stopped = 0
@@ -163,41 +468,103 @@ elif page == "Extraction Control":
             st.success(f"Stopped {stopped} extractions")
             st.rerun()
     with bcol3:
-        # D-drive mount check
-        d_drive = os.path.exists("/Volumes/D-drive-music/Movies")
-        if d_drive:
-            st.success("D-drive mounted")
+        d_check = health.check_d_drive()
+        if d_check["ok"]:
+            st.success(d_check["message"])
         else:
-            st.error("D-drive NOT mounted!")
+            st.error(d_check["message"])
+    with bcol4:
+        new_max = st.select_slider("Max concurrent", options=[1, 2, 3, 4],
+                                    value=_max_concurrent, key="max_concurrent_slider")
+        if new_max != _max_concurrent:
+            extraction.set_max_concurrent(new_max)
+            st.rerun()
 
     st.markdown("---")
 
-    # Per-movie controls
+    # Per-movie controls with diagnosis
     for s in scripts:
-        icon = "🔄" if s["is_running"] else ("✅" if s["verified"] == s["total_clips"] and s["total_clips"] > 0 else "⏸️")
+        diag = health.diagnose_movie(s)
+        severity = diag["severity"]
+
+        # Descriptive expander label instead of vague icons
+        if severity == "red":
+            label_prefix = "PROBLEM"
+        elif severity == "green" and s["is_running"]:
+            label_prefix = "RUNNING"
+        elif severity == "green":
+            label_prefix = "OK"
+        else:
+            label_prefix = "WARN"
 
         with st.expander(
-            f"{icon} {s['name']} — {s['extracted_count']}/{s['total_clips']} extracted, "
-            f"{s['verified']} verified, {s['needs_review']} review, {s['failed']} failed",
-            expanded=s["is_running"]
+            f"[{label_prefix}] {s['name']} — {diag['summary']}",
+            expanded=(severity == "red" or s["is_running"])
         ):
+            # Per-movie diagnosis panel (Phase 1C)
+            if severity == "red":
+                st.error(diag["summary"])
+                for detail in diag["details"]:
+                    st.markdown(f"- {detail}")
+                for fix in diag["fixes"]:
+                    st.info(f"Suggested fix: {fix}")
+            elif severity == "orange":
+                st.warning(diag["summary"])
+                for detail in diag["details"]:
+                    st.markdown(f"- {detail}")
+                for fix in diag["fixes"]:
+                    st.info(f"Suggested fix: {fix}")
+
+            # One-click fix buttons (Phase 4C)
+            transcript_check = health.check_transcript(s["name"])
+            if not transcript_check["ok"] and transcript_check["exists"]:
+                if st.button("Delete corrupt transcript & restart",
+                             key=f"fix_transcript_{s['name']}", type="primary"):
+                    del_result = extraction.delete_transcript(s["name"])
+                    if del_result["ok"]:
+                        start_result = extraction.start_extraction(s["name"])
+                        if "error" in start_result:
+                            st.success("Transcript deleted.")
+                            st.warning(f"Could not auto-start: {start_result['error']}")
+                        else:
+                            st.success("Transcript deleted and extraction restarted!")
+                    else:
+                        st.error(f"Failed: {del_result.get('error', 'Unknown error')}")
+                    st.rerun()
+
+            if not s["is_running"] and s["extracted_count"] > 0 and s["failed"] > 0:
+                if st.button("Reset extraction & start fresh",
+                             key=f"reset_{s['name']}"):
+                    reset_result = extraction.reset_movie_extraction(s["name"])
+                    if reset_result["ok"]:
+                        st.success(f"Reset {s['name']} — deleted: {', '.join(reset_result['deleted'])}")
+                    else:
+                        st.error(f"Reset failed: {reset_result.get('error', 'Unknown error')}")
+                    st.rerun()
+
             # Controls
             ctrl1, ctrl2, ctrl3, ctrl4 = st.columns(4)
             with ctrl1:
                 if s["is_running"]:
-                    if st.button(f"Stop", key=f"stop_{s['name']}"):
+                    if st.button("Stop", key=f"stop_{s['name']}"):
                         extraction.stop_extraction(s["name"])
                         st.rerun()
                 else:
-                    if st.button(f"Start", key=f"start_{s['name']}", type="primary"):
-                        extraction.start_extraction(s["name"])
-                        st.rerun()
+                    if st.button("Start", key=f"start_{s['name']}", type="primary"):
+                        result = extraction.start_extraction(s["name"])
+                        if "error" in result:
+                            st.error(result["error"])
+                        else:
+                            st.rerun()
             with ctrl2:
                 if not s["is_running"]:
                     if st.button("Force restart", key=f"force_{s['name']}"):
                         extraction.stop_extraction(s["name"])
-                        extraction.start_extraction(s["name"])
-                        st.rerun()
+                        result = extraction.start_extraction(s["name"])
+                        if "error" in result:
+                            st.error(result["error"])
+                        else:
+                            st.rerun()
             with ctrl3:
                 st.metric("Extracted", s["extracted_count"])
             with ctrl4:
@@ -222,87 +589,145 @@ elif page == "Extraction Control":
                 if log_data:
                     st.dataframe(log_data, use_container_width=True, hide_index=True)
 
-            # Console log
+            # Parsed error summary (Phase 3B) — replaces raw console log
+            log_errors = health.parse_log_errors(s["name"])
+            if log_errors:
+                st.caption("Detected Issues")
+                for err in log_errors:
+                    st.warning(f"**{err['label']}**: {err['fix']}")
+
+            # Raw console log in nested expander for power users
             log_text = extraction.get_extraction_log(s["name"], tail=30)
             if log_text:
-                with st.expander("Console log (last 30 lines)"):
+                with st.expander("Raw console log (last 30 lines)"):
                     st.code(log_text, language="text")
 
-    # ---- Add Movie / Add Clips section ----
+    # ---- Quick Add: type name → search → add to library + extraction batch ----
     st.markdown("---")
-    st.subheader("Add Movie")
+    st.subheader("Quick Add")
 
-    add_tab1, add_tab2 = st.tabs(["New Movie", "Add Clips to Existing"])
+    qa_tab1, qa_tab2, qa_tab3, qa_tab4, qa_tab5 = st.tabs([
+        "🎬 Movie", "📺 TV Show", "🎵 Music", "📂 Local Movie", "📋 Add Clips"
+    ])
 
-    with add_tab1:
-        # ---- New Movie ----
-        acol1, acol2 = st.columns(2)
-        with acol1:
-            new_movie_name = st.text_input("Movie slug", placeholder="baseketball", help="Lowercase, no spaces (e.g. 'baseketball', 'spacejam')")
-        with acol2:
-            new_movie_title = st.text_input("Display title", placeholder="BASEketball (1998)")
+    for tab, svc_key, svc_label, placeholder in [
+        (qa_tab1, "movie", "Radarr", "The Big Lebowski"),
+        (qa_tab2, "tv", "Sonarr", "Breaking Bad"),
+        (qa_tab3, "music", "Lidarr", "Metallica"),
+    ]:
+        with tab:
+            if not media_client.is_available(svc_key):
+                st.warning(f"{svc_label} not configured — add API key to ~/.openpeon/.env")
+                continue
 
-        # MKV finder
-        mkv_search = st.text_input("Search D-drive for MKV", placeholder="Type movie name to search...", key="mkv_search")
-        mkv_path_manual = ""
-        if mkv_search:
-            mkv_results = extraction.find_mkv_files(mkv_search)
-            if mkv_results:
-                mkv_options = [f"{r['dir_name']} — {r['size_gb']}GB" for r in mkv_results]
-                mkv_choice = st.selectbox("Select MKV", mkv_options, key="mkv_select")
-                idx = mkv_options.index(mkv_choice)
-                mkv_path_manual = mkv_results[idx]["mkv_path"]
-                st.caption(f"`{mkv_path_manual}`")
-            else:
-                st.info(f"No MKV found matching '{mkv_search}' — you can enter the path manually below or add via Radarr")
+            search_term = st.text_input(
+                f"Search {svc_label}",
+                placeholder=placeholder,
+                key=f"qa_search_{svc_key}",
+            )
 
-        mkv_path_override = st.text_input("MKV path (manual override)", value=mkv_path_manual, key="mkv_path_manual",
-                                          help="Full path to MKV file. Leave empty to add later.")
-        audio_stream = st.text_input("Audio stream", value="0:1", help="ffmpeg audio stream index")
-
-        # Quotes textarea — paste multiple at once
-        st.caption("Paste initial quotes (one per line): `clip_name | timestamp_seconds | quote text | duration`")
-        st.caption("Example: `yippee_ki_yay | 3600 | Yippee-ki-yay, motherfucker. | 3`")
-        quotes_text = st.text_area("Quotes (optional — can add later)", height=150, key="new_movie_quotes",
-                                   placeholder="clip_name | timestamp | quote text | duration\nclip_name | timestamp | quote text | duration")
-
-        if st.button("Create Movie", type="primary", key="create_movie_btn"):
-            if not new_movie_name:
-                st.error("Movie slug is required")
-            elif not new_movie_title:
-                st.error("Display title is required")
-            else:
-                slug = extraction.slugify(new_movie_name)
-                mkv = mkv_path_override or f"/Volumes/D-drive-music/Movies/{new_movie_title}/{new_movie_title} Remux-1080p.mkv"
-
-                # Parse quotes
-                clips = []
-                if quotes_text.strip():
-                    for line in quotes_text.strip().split("\n"):
-                        parts = [p.strip() for p in line.split("|")]
-                        if len(parts) >= 4:
-                            try:
-                                clips.append((
-                                    extraction.slugify(parts[0]),
-                                    int(parts[1]),
-                                    parts[2],
-                                    int(parts[3]),
-                                ))
-                            except ValueError:
-                                st.warning(f"Skipping invalid line: {line}")
-
-                result = extraction.create_movie_script(slug, new_movie_title, mkv, audio_stream, clips or None)
-                if result.get("ok"):
-                    st.success(f"Created extract_{slug}.py with {len(clips)} clips!")
-                    st.rerun()
+            if search_term:
+                results = media_client.search(svc_key, search_term)
+                if isinstance(results, dict) and "error" in results:
+                    st.error(f"{svc_label} error: {results['error']}")
+                elif not results:
+                    st.info("No results found")
                 else:
-                    st.error(result.get("error", "Unknown error"))
+                    for i, r in enumerate(results[:6]):
+                        col_poster, col_info, col_btn = st.columns([1, 4, 1])
+                        with col_poster:
+                            if r.get("poster_url"):
+                                st.image(r["poster_url"], width=60)
+                            else:
+                                st.markdown("🎬" if svc_key == "movie" else "📺" if svc_key == "tv" else "🎵")
+                        with col_info:
+                            year_str = f" ({r['year']})" if r.get("year") else ""
+                            st.markdown(f"**{r['title']}**{year_str}")
+                            if r.get("overview"):
+                                st.caption(r["overview"][:120] + ("..." if len(r.get("overview", "")) > 120 else ""))
+                        with col_btn:
+                            if r.get("already_added"):
+                                st.markdown("✅ Added")
+                            else:
+                                if st.button("➕ Add", key=f"qa_add_{svc_key}_{i}", type="primary"):
+                                    with st.spinner(f"Adding to {svc_label}..."):
+                                        qa_result = media_client.quick_add(svc_key, r)
 
-    with add_tab2:
+                                    # Report library result
+                                    lib = qa_result.get("library_result", {})
+                                    if qa_result.get("library_already_existed"):
+                                        st.info(f"Already in {svc_label}: {qa_result['title']}")
+                                    elif isinstance(lib, dict) and "error" in lib:
+                                        st.error(f"{svc_label}: {lib['error'][:200]}")
+                                    else:
+                                        st.success(f"Added to {svc_label}: {qa_result['title']}")
+
+                                    # Report batch result
+                                    batch = qa_result.get("batch_result")
+                                    if batch:
+                                        if batch.get("already_exists"):
+                                            st.info(f"Extraction batch already exists: {batch.get('slug', '')}")
+                                        elif batch.get("ok"):
+                                            st.success("Extraction batch created!")
+                                        elif batch.get("error"):
+                                            st.error(f"Quote generation failed: {batch['error'][:200]}")
+                                            st.caption("Use 'Retry Quotes' in Media Library > Pipeline Targets to try again.")
+
+    with qa_tab4:
+        # ---- Add Local Movie as Extraction Batch ----
+        st.caption("Create extraction batch for a movie already on disk — quotes auto-generated via LLM")
+
+        local_search = st.text_input("Search D-drive for MKV", placeholder="Ghostbusters",
+                                     key="local_movie_search")
+        if local_search:
+            mkv_results = extraction.find_mkv_files(local_search)
+            if not mkv_results:
+                st.warning("No MKV files found matching that name on D-drive")
+            else:
+                for i, mkv in enumerate(mkv_results[:8]):
+                    col_info, col_btn = st.columns([4, 1])
+                    with col_info:
+                        st.markdown(f"**{mkv['dir_name']}**")
+                        st.caption(f"`{mkv['mkv_path']}` — {mkv['size_gb']} GB")
+                    with col_btn:
+                        slug = extraction.slugify(mkv["dir_name"].split("(")[0].strip())
+                        script_exists = os.path.exists(os.path.join(
+                            extraction.EXTRACTION_DIR, f"extract_{slug}.py"
+                        ))
+                        if script_exists:
+                            st.markdown("✅ Exists")
+                        else:
+                            if st.button("🎬 Create", key=f"local_add_{i}", type="primary"):
+                                # Parse year from dir name if present
+                                year_match = re.search(r'\((\d{4})\)', mkv["dir_name"])
+                                year = year_match.group(1) if year_match else ""
+                                title = mkv["dir_name"].split("(")[0].strip()
+
+                                with st.spinner(f"Generating quotes for {title} via LLM..."):
+                                    result = quote_generator.populate_extraction_script(
+                                        name=slug,
+                                        title=title,
+                                        mkv_path=mkv["mkv_path"],
+                                        year=year,
+                                        audio_stream="0:1",
+                                    )
+
+                                if isinstance(result, dict) and result.get("ok"):
+                                    st.success(
+                                        f"Created extraction batch for {title} "
+                                        f"with {result.get('clip_count', 0)} quotes!"
+                                    )
+                                    st.rerun()
+                                elif isinstance(result, dict) and result.get("error"):
+                                    st.error(f"Error: {result['error'][:200]}")
+                                else:
+                                    st.error("Unknown error creating batch")
+
+    with qa_tab5:
         # ---- Add Clips to Existing ----
         existing_names = [s["name"] for s in scripts]
         if not existing_names:
-            st.info("No movies yet. Create one in the 'New Movie' tab first.")
+            st.info("No movies yet. Add one via Quick Add or Local Movie first.")
         else:
             target_movie = st.selectbox("Movie", existing_names, key="add_clips_movie")
             st.caption("Add quotes (one per line): `clip_name | timestamp_seconds | quote text | duration`")
@@ -458,6 +883,7 @@ elif page == "Clip Review":
             st.markdown("---")
 
             categories = [""] + pack_builder.CATEGORIES
+            cat_counts = extraction.get_category_counts(selected_movie)
 
             # --- Clip review cards ---
             for i, clip in enumerate(clips):
@@ -481,12 +907,13 @@ elif page == "Clip Review":
 
                 # ========== COMPACT MODE ==========
                 if compact_mode:
-                    # Auto-suggest category
+                    # Auto-suggest category (always returns at least one)
                     suggestions = extraction.suggest_category(
-                        clip.get("expected_quote", ""), clip["name"]
+                        clip.get("expected_quote", ""), clip["name"], cat_counts
                     )
                     suggested_cat = suggestions[0][0] if suggestions else ""
-                    current_cat = clip.get("category", "") or suggested_cat
+                    stored_cat = clip.get("category", "")
+                    current_cat = stored_cat or suggested_cat
 
                     score_str = f"{v_score:.0%}" if v_score else ""
                     quote_short = clip["expected_quote"][:40] if clip["expected_quote"] else ""
@@ -511,6 +938,9 @@ elif page == "Clip Review":
                             index=categories.index(current_cat) if current_cat in categories else 0,
                             key=f"cc_{clip['name']}_{i}", label_visibility="collapsed"
                         )
+                    # Auto-save category when dropdown changes
+                    if new_cat and new_cat != stored_cat:
+                        extraction.save_clip_category(selected_movie, clip["name"], new_cat)
                     with c5:
                         if rev_status != "approved":
                             if st.button("✅", key=f"qa_{clip['name']}_{i}",
@@ -526,9 +956,24 @@ elif page == "Clip Review":
                                 extraction.save_clip_review(selected_movie, clip["name"], "rejected", new_cat)
                                 st.rerun()
                         with bc2:
-                            if (clip["has_mp3"] or ext_status == "failed") and st.button("🔄", key=f"qe_{clip['name']}_{i}"):
-                                extraction.retry_clip(selected_movie, clip["name"])
-                                st.info(f"Re-extracting {clip['name']}")
+                            if clip["has_mp3"] or ext_status == "failed":
+                                rc1, rc2 = st.columns(2)
+                                with rc1:
+                                    if st.button("🔄", key=f"qe_{clip['name']}_{i}"):
+                                        extraction.retry_clip(selected_movie, clip["name"])
+                                        st.info(f"Re-extracting {clip['name']}")
+                                with rc2:
+                                    ov_ts = st.number_input(
+                                        "ts", min_value=0, step=1,
+                                        key=f"ov_{clip['name']}_{i}",
+                                        label_visibility="collapsed",
+                                        placeholder="override sec",
+                                    )
+                                    if ov_ts and st.button("🎯", key=f"ovb_{clip['name']}_{i}",
+                                                           help="Retry at exact timestamp"):
+                                        extraction.retry_clip(selected_movie, clip["name"],
+                                                              override_timestamp=ov_ts)
+                                        st.info(f"Re-extracting {clip['name']} at {ov_ts}s")
 
                     continue  # Skip the detailed expander
 
@@ -568,14 +1013,15 @@ elif page == "Clip Review":
                             st.caption(f"Note: {clip['notes']}")
 
                     with col_actions:
-                        # Category suggestion
+                        # Category suggestion (always returns at least one)
                         suggestions = extraction.suggest_category(
-                            clip.get("expected_quote", ""), clip["name"]
+                            clip.get("expected_quote", ""), clip["name"], cat_counts
                         )
                         suggested_cat = suggestions[0][0] if suggestions else ""
 
                         # Default to saved category, then suggestion
-                        default_cat = clip["category"] if clip["category"] else suggested_cat
+                        stored_cat = clip["category"] if clip["category"] else ""
+                        default_cat = stored_cat or suggested_cat
                         default_idx = categories.index(default_cat) if default_cat in categories else 0
 
                         new_cat = st.selectbox(
@@ -585,8 +1031,12 @@ elif page == "Clip Review":
                             key=f"cat_{clip['name']}_{i}"
                         )
 
+                        # Auto-save category when dropdown changes
+                        if new_cat and new_cat != stored_cat:
+                            extraction.save_clip_category(selected_movie, clip["name"], new_cat)
+
                         # Show suggestion hint if no category set yet
-                        if not clip["category"] and suggestions:
+                        if not stored_cat and suggestions:
                             top3 = ", ".join(f"{c} ({s:.0%})" for c, s in suggestions[:3])
                             st.caption(f"Suggested: {top3}")
 
@@ -609,6 +1059,17 @@ elif page == "Clip Review":
                                         st.error(f"Retry failed: {result['error']}")
                                     else:
                                         st.info(f"Re-extracting {clip['name']} on Mini (PID {result['pid']})")
+                                ov_ts = st.number_input(
+                                    "Override timestamp (sec)", min_value=0, step=1,
+                                    key=f"ovd_{clip['name']}_{i}",
+                                )
+                                if ov_ts and st.button("🎯 Retry at timestamp", key=f"ovdb_{clip['name']}_{i}"):
+                                    result = extraction.retry_clip(
+                                        selected_movie, clip["name"], override_timestamp=ov_ts)
+                                    if "error" in result:
+                                        st.error(f"Override retry failed: {result['error']}")
+                                    else:
+                                        st.info(f"Re-extracting {clip['name']} at {ov_ts}s")
                         with a4:
                             if st.button("🔄🔁", key=f"sync_{clip['name']}_{i}",
                                          help="Sync results from Mini"):
@@ -774,18 +1235,48 @@ elif page == "Pack Review":
             st.markdown("---")
 
             # --- Sound filter ---
-            sound_filter = st.selectbox("Show sounds", [
-                "All", "Needs attention", "Unreviewed", "Flagged only", "Pending fix", "OK only"
-            ], key="pack_sound_filter")
+            fcol1, fcol2 = st.columns([2, 1])
+            with fcol1:
+                sound_filter = st.selectbox("Show sounds", [
+                    "All", "Needs attention", "Unreviewed", "Flagged only", "Pending fix", "OK only"
+                ], key="pack_sound_filter")
 
             st.markdown("---")
 
+            # Load clip library once for all add/replace operations
+            clip_library = pack_builder.get_clip_library(exclude_pack=selected_pack_name)
+            # Index: files already in this pack
+            pack_files = set()
+            for _cat, _sounds in details["categories"].items():
+                for _s in _sounds:
+                    pack_files.add(_s["file"])
+
+            # Show ALL 7 CESP categories (including missing ones)
+            all_cats_in_pack = set(details["categories"].keys())
+            missing_cats = [c for c in pack_builder.CATEGORIES if c not in all_cats_in_pack]
+
             # Sound review by category
-            for cat_idx, (cat, sounds) in enumerate(details["categories"].items()):
+            for cat_idx, cat in enumerate(pack_builder.CATEGORIES):
+                sounds = details["categories"].get(cat, [])
                 cat_flagged = sum(1 for s in sounds if s["review_status"] in ("needs-update", "needs-fix"))
                 cat_ok = sum(1 for s in sounds if s["review_status"] == "ok")
-                cat_unreviewed = sum(1 for s in sounds if s["review_status"] == "unreviewed")
-                cat_icon = "🔴" if cat_flagged else ("✅" if cat_ok == len(sounds) else "⬜")
+                cat_missing_files = sum(1 for s in sounds if not s["exists"])
+
+                if not sounds:
+                    cat_icon = "🚫"
+                    cat_label = f"{cat_icon} {cat} — EMPTY (no sounds!)"
+                elif cat_missing_files:
+                    cat_icon = "💀"
+                    cat_label = f"{cat_icon} {cat} — {len(sounds)} sounds ({cat_missing_files} MISSING FILES)"
+                elif cat_flagged:
+                    cat_icon = "🔴"
+                    cat_label = f"{cat_icon} {cat} — {len(sounds)} sounds ({cat_ok} ok, {cat_flagged} flagged)"
+                elif cat_ok == len(sounds):
+                    cat_icon = "✅"
+                    cat_label = f"{cat_icon} {cat} — {len(sounds)} sounds (all ok)"
+                else:
+                    cat_icon = "⬜"
+                    cat_label = f"{cat_icon} {cat} — {len(sounds)} sounds ({cat_ok} ok)"
 
                 # Filter sounds
                 if sound_filter == "Needs attention":
@@ -801,16 +1292,82 @@ elif page == "Pack Review":
                 else:
                     filtered_sounds = sounds
 
-                # Skip empty categories when filtering
-                if not filtered_sounds and sound_filter != "All":
+                # Skip categories only when they have sounds but all are filtered out
+                if sounds and not filtered_sounds and sound_filter != "All":
                     continue
 
-                with st.expander(
-                    f"{cat_icon} {cat} — {len(sounds)} sounds ({cat_ok} ok, {cat_flagged} flagged)",
-                    expanded=(cat_ok < len(sounds))
-                ):
+                should_expand = (not sounds) or cat_missing_files or (cat_ok < len(sounds))
+                with st.expander(cat_label, expanded=should_expand):
+
+                    # === EMPTY CATEGORY: big "add sound" prompt ===
+                    if not sounds:
+                        st.warning(f"This category has no sounds. Packs need all 7 CESP categories filled.")
+                        # Show clips from library matching this category
+                        matching = [c for c in clip_library if c["category"] == cat
+                                    and c["clip_name"] + ".mp3" not in pack_files]
+                        other = [c for c in clip_library if c["category"] != cat
+                                 and c["clip_name"] + ".mp3" not in pack_files]
+
+                        if matching:
+                            st.caption(f"{len(matching)} approved clips already categorized as **{cat}**:")
+                            options_matching = [
+                                f"{c['clip_name']} — \"{c['label'][:50]}\" ({c['movie']}, {c['size_kb']}KB)"
+                                for c in matching
+                            ]
+                            sel = st.selectbox(
+                                f"Add clip to {cat}", options_matching,
+                                key=f"add_empty_{cat}_{cat_idx}"
+                            )
+                            sel_idx = options_matching.index(sel) if sel else 0
+                            sel_clip = matching[sel_idx]
+                            # Preview audio
+                            try:
+                                with open(sel_clip["path"], "rb") as af:
+                                    st.audio(af.read(), format="audio/mp3")
+                            except Exception:
+                                pass
+                            if st.button(f"➕ Add to {cat}", key=f"add_btn_empty_{cat}_{cat_idx}",
+                                         type="primary"):
+                                result = pack_builder.add_pack_sound(
+                                    selected_pack_name, cat, sel_clip["path"], sel_clip["label"])
+                                if result.get("ok"):
+                                    st.success(f"Added {sel_clip['clip_name']} to {cat}")
+                                else:
+                                    st.error(result.get("error", "Failed"))
+                                st.rerun()
+
+                        if other:
+                            with st.popover(f"Browse all {len(other)} clips"):
+                                st.caption("Clips from other categories (will be re-assigned)")
+                                options_other = [
+                                    f"{c['clip_name']} — \"{c['label'][:40]}\" [{c['category']}] ({c['movie']})"
+                                    for c in other
+                                ]
+                                sel_o = st.selectbox(
+                                    "Pick clip", options_other,
+                                    key=f"add_other_{cat}_{cat_idx}"
+                                )
+                                sel_o_idx = options_other.index(sel_o) if sel_o else 0
+                                sel_o_clip = other[sel_o_idx]
+                                try:
+                                    with open(sel_o_clip["path"], "rb") as af:
+                                        st.audio(af.read(), format="audio/mp3")
+                                except Exception:
+                                    pass
+                                if st.button(f"➕ Add to {cat}", key=f"add_other_btn_{cat}_{cat_idx}"):
+                                    result = pack_builder.add_pack_sound(
+                                        selected_pack_name, cat, sel_o_clip["path"], sel_o_clip["label"])
+                                    if result.get("ok"):
+                                        st.success(f"Added {sel_o_clip['clip_name']}")
+                                    else:
+                                        st.error(result.get("error", "Failed"))
+                                    st.rerun()
+                        continue  # skip sound iteration for empty categories
+
+                    # === SOUND-BY-SOUND REVIEW ===
                     if not filtered_sounds:
                         st.caption("All sounds filtered out.")
+
                     for s_idx, sound in enumerate(filtered_sounds):
                         rev = sound["review_status"]
                         if rev == "ok":
@@ -836,7 +1393,7 @@ elif page == "Pack Review":
                                 except Exception:
                                     st.warning("Audio load failed")
                             else:
-                                st.error("File missing!")
+                                st.error("File missing! Use Replace to swap in a working clip.")
 
                         with acol2:
                             key_base = f"pr_{selected_pack_name}_{cat_idx}_{s_idx}"
@@ -914,6 +1471,70 @@ elif page == "Pack Review":
                                             st.info("No backup to restore")
                                         st.rerun()
 
+                            # --- Sound management: Replace / Remove / Move ---
+                            mgmt_cols = st.columns(3)
+                            with mgmt_cols[0]:
+                                with st.popover("🔄 Replace"):
+                                    st.caption("Swap this sound with a different clip")
+                                    avail = [c for c in clip_library
+                                             if c["clip_name"] + ".mp3" not in pack_files
+                                             or c["clip_name"] + ".mp3" == sound["file"]]
+                                    if avail:
+                                        opts = [
+                                            f"{c['clip_name']} — \"{c['label'][:40]}\" ({c['movie']})"
+                                            for c in avail
+                                        ]
+                                        pick = st.selectbox("Replacement", opts,
+                                                            key=f"repl_{key_base}")
+                                        pick_idx = opts.index(pick) if pick else 0
+                                        pick_clip = avail[pick_idx]
+                                        try:
+                                            with open(pick_clip["path"], "rb") as af:
+                                                st.audio(af.read(), format="audio/mp3")
+                                        except Exception:
+                                            pass
+                                        st.caption(f"Category: {pick_clip['category']} | {pick_clip['size_kb']}KB")
+                                        if st.button("Confirm replace", key=f"repl_go_{key_base}",
+                                                     type="primary"):
+                                            result = pack_builder.replace_pack_sound(
+                                                selected_pack_name, cat, sound["file"],
+                                                pick_clip["path"], pick_clip["label"])
+                                            if result.get("ok"):
+                                                st.success(f"Replaced with {pick_clip['clip_name']}")
+                                            else:
+                                                st.error(result.get("error", "Failed"))
+                                            st.rerun()
+                                    else:
+                                        st.info("No replacement clips available")
+                            with mgmt_cols[1]:
+                                with st.popover("🗑️ Remove"):
+                                    st.warning(f"Remove **{sound['file']}** from this pack?")
+                                    st.caption("Audio is backed up, not deleted forever.")
+                                    if st.button("Yes, remove it", key=f"rm_{key_base}",
+                                                 type="primary"):
+                                        result = pack_builder.remove_pack_sound(
+                                            selected_pack_name, cat, sound["file"])
+                                        if result.get("ok"):
+                                            st.success(f"Removed {sound['file']}")
+                                        else:
+                                            st.error(result.get("error", "Failed"))
+                                        st.rerun()
+                            with mgmt_cols[2]:
+                                other_cats = [c for c in pack_builder.CATEGORIES if c != cat]
+                                with st.popover("➡️ Move"):
+                                    st.caption(f"Move from **{cat}** to:")
+                                    dest_cat = st.selectbox("Destination", other_cats,
+                                                            key=f"mv_{key_base}")
+                                    if st.button("Move", key=f"mv_go_{key_base}",
+                                                 type="primary"):
+                                        result = pack_builder.move_pack_sound(
+                                            selected_pack_name, sound["file"], cat, dest_cat)
+                                        if result.get("ok"):
+                                            st.success(f"Moved to {dest_cat}")
+                                        else:
+                                            st.error(result.get("error", "Failed"))
+                                        st.rerun()
+
                             note = st.text_input(
                                 "Note", value=sound["review_notes"],
                                 key=f"note_{key_base}",
@@ -931,6 +1552,44 @@ elif page == "Pack Review":
 
                         if s_idx < len(filtered_sounds) - 1:
                             st.markdown("---")
+
+                    # === ADD CLIP TO THIS CATEGORY (at bottom of category) ===
+                    st.markdown("---")
+                    avail_for_cat = [c for c in clip_library
+                                     if c["clip_name"] + ".mp3" not in pack_files]
+                    # Show clips matching this category first, then others
+                    matching_cat = [c for c in avail_for_cat if c["category"] == cat]
+                    other_cat = [c for c in avail_for_cat if c["category"] != cat]
+                    all_for_add = matching_cat + other_cat
+
+                    if all_for_add:
+                        with st.popover(f"➕ Add clip to {cat}"):
+                            opts_add = []
+                            for c in all_for_add:
+                                tag = f" [{c['category']}]" if c["category"] != cat else ""
+                                opts_add.append(
+                                    f"{c['clip_name']} — \"{c['label'][:40]}\"{tag} ({c['movie']})"
+                                )
+                            pick_add = st.selectbox("Clip", opts_add,
+                                                    key=f"add_cat_{cat}_{cat_idx}")
+                            pick_add_idx = opts_add.index(pick_add) if pick_add else 0
+                            pick_add_clip = all_for_add[pick_add_idx]
+                            try:
+                                with open(pick_add_clip["path"], "rb") as af:
+                                    st.audio(af.read(), format="audio/mp3")
+                            except Exception:
+                                pass
+                            st.caption(f"From: {pick_add_clip['movie']} | {pick_add_clip['size_kb']}KB")
+                            if st.button("➕ Add", key=f"add_go_{cat}_{cat_idx}",
+                                         type="primary"):
+                                result = pack_builder.add_pack_sound(
+                                    selected_pack_name, cat,
+                                    pick_add_clip["path"], pick_add_clip["label"])
+                                if result.get("ok"):
+                                    st.success(f"Added {pick_add_clip['clip_name']}")
+                                else:
+                                    st.error(result.get("error", "Failed"))
+                                st.rerun()
 
             # --- Icon management section ---
             st.markdown("---")
@@ -1080,8 +1739,19 @@ elif page == "Pack Designer":
                     else:
                         st.warning("No approved clips with categories found")
 
+            # Detect existing pack
+            existing_pack_dir = os.path.join(
+                os.path.expanduser("~/dev/openpeon-movie-packs"), pack_name
+            )
+            pack_exists = os.path.exists(
+                os.path.join(existing_pack_dir, "openpeon.json")
+            )
+            build_label = "🔄 Update Pack" if pack_exists else "🏗️ Build Pack"
+            if pack_exists:
+                st.info(f"Pack **{pack_name}** already exists — Build will merge new clips into it.")
+
             with dcol3:
-                if st.button("Build Pack", type="primary", key=f"build_{selected}"):
+                if st.button(build_label, type="primary", key=f"build_{selected}"):
                     # Auto-save draft before building
                     pack_builder.save_draft(selected, {
                         "pack_name": pack_name,
@@ -1098,10 +1768,22 @@ elif page == "Pack Designer":
                         st.error(result["error"])
                     else:
                         st.success(
-                            f"Built: {result['sounds']} sounds, "
+                            f"{result['status'].capitalize()}: {result['sounds']} sounds, "
                             f"{result['size_bytes']//1024}KB, "
                             f"{result['categories']} categories"
                         )
+                        if st.button("📤 Publish to Registry", key=f"quick_pub_{selected}"):
+                            with st.spinner(f"Publishing {pack_name}..."):
+                                pub_result = pack_builder.publish_pack(pack_name)
+                            if pub_result.get("ok"):
+                                msg = pub_result["message"]
+                                url = pub_result.get("commit_url", "")
+                                if url:
+                                    st.success(f"{msg} — [view commit]({url})")
+                                else:
+                                    st.success(msg)
+                            else:
+                                st.error(pub_result["error"])
 
             with dcol4:
                 if st.button("🔄 Reset", key=f"reset_{selected}",
@@ -1127,79 +1809,283 @@ elif page == "Pack Designer":
                 f"{p['sound_count']} sounds — {', '.join(p['tags'][:4])}"
             )
 
+    # ---- Publish to Registry ----
+    st.markdown("---")
+    st.subheader("Publish to Registry")
+    st.caption("Commit and push pack changes to the GitHub registry.")
+
+    unpublished = pack_builder.get_unpublished_packs()
+
+    if not unpublished:
+        st.success("All packs are up to date with the registry.")
+    else:
+        st.warning(f"{len(unpublished)} pack(s) have unpublished changes")
+
+        # Batch publish button
+        if len(unpublished) > 1:
+            if st.button(f"📤 Publish all {len(unpublished)} packs", type="primary",
+                         key="publish_all"):
+                with st.spinner("Publishing all packs..."):
+                    results = pack_builder.publish_all_packs()
+                ok_results = [r for r in results if r.get("ok")]
+                fail_results = [r for r in results if not r.get("ok")]
+                if ok_results:
+                    names = ", ".join(r["display_name"] for r in ok_results)
+                    last_url = next((r.get("commit_url", "") for r in reversed(ok_results) if r.get("commit_url")), "")
+                    if last_url:
+                        st.success(f"Published {len(ok_results)} pack(s): {names} — [view commits]({last_url})")
+                    else:
+                        st.success(f"Published {len(ok_results)} pack(s): {names}")
+                for r in fail_results:
+                    st.error(f"Failed: {r.get('pack_name', '?')} — {r.get('error', 'unknown')}")
+                st.rerun()
+
+        # Individual pack rows
+        for pack in unpublished:
+            pcol1, pcol2, pcol3 = st.columns([3, 1, 1])
+            with pcol1:
+                status_icon = "🆕" if pack["is_new"] else "📝"
+                st.markdown(
+                    f"{status_icon} **{pack['display_name']}** v{pack['version']} "
+                    f"— {pack['files_changed']} file(s) changed"
+                )
+            with pcol2:
+                status_label = "New pack" if pack["is_new"] else "Modified"
+                st.caption(status_label)
+            with pcol3:
+                if st.button("Publish", key=f"publish_{pack['name']}"):
+                    with st.spinner(f"Publishing {pack['display_name']}..."):
+                        pub_result = pack_builder.publish_pack(pack["name"])
+                    if pub_result.get("ok"):
+                        url = pub_result.get("commit_url", "")
+                        if url:
+                            st.success(f"{pub_result['message']} — [view commit]({url})")
+                        else:
+                            st.success(pub_result["message"])
+                    else:
+                        st.error(pub_result["error"])
+                    st.rerun()
+
+    # ---- Register in PeonPing Registry ----
+    st.markdown("---")
+    st.subheader("Register in PeonPing Registry")
+    st.caption("Create a PR to PeonPing/registry to list packs in the official index.")
+
+    registry_status = pack_builder.get_registry_status()
+    unregistered = [
+        (name, info) for name, info in registry_status.items()
+        if not info["registered"]
+    ]
+    registered = [
+        (name, info) for name, info in registry_status.items()
+        if info["registered"]
+    ]
+
+    if registered:
+        with st.expander(f"Already registered ({len(registered)})"):
+            for name, info in sorted(registered):
+                st.markdown(f"- **{name}** — registry v{info['registry_version']}")
+
+    if not unregistered:
+        st.success("All published packs are registered in PeonPing/registry.")
+    else:
+        st.warning(f"{len(unregistered)} pack(s) not yet in PeonPing registry")
+
+        # Source ref (tag) selector
+        try:
+            tag_result = subprocess.run(
+                ["git", "tag", "-l", "--sort=-v:refname"],
+                capture_output=True, text=True, timeout=5,
+                cwd=pack_builder.PACKS_DIR,
+            )
+            tags = [t.strip() for t in tag_result.stdout.strip().splitlines() if t.strip()]
+        except Exception:
+            tags = []
+
+        source_ref = st.selectbox(
+            "Source tag (source_ref)", tags if tags else ["v1.0.0"],
+            help="Git tag on MattBillock/openpeon-movie-packs that CI will validate against"
+        )
+
+        # Batch register
+        unreg_names = [name for name, _ in unregistered]
+        if len(unregistered) > 1:
+            if st.button(f"Register all {len(unregistered)} packs", type="primary",
+                         key="register_all"):
+                with st.spinner("Creating registry PR..."):
+                    result = pack_builder.register_all_packs(source_ref, unreg_names)
+                if result.get("ok"):
+                    pr_url = result.get("pr_url", "")
+                    if pr_url:
+                        st.success(f"PR created: [{pr_url}]({pr_url})")
+                    else:
+                        st.success(result.get("message", "Done"))
+                else:
+                    st.error(result["error"])
+                st.rerun()
+
+        for name, info in sorted(unregistered):
+            rcol1, rcol2 = st.columns([4, 1])
+            with rcol1:
+                st.markdown(f"**{name}** — not in registry")
+            with rcol2:
+                if st.button("Register", key=f"reg_{name}"):
+                    with st.spinner(f"Registering {name}..."):
+                        result = pack_builder.register_pack(name, source_ref)
+                    if result.get("ok"):
+                        pr_url = result.get("pr_url", "")
+                        if pr_url:
+                            st.success(f"PR created: [{pr_url}]({pr_url})")
+                        else:
+                            st.success(result.get("message", "Registered"))
+                    else:
+                        st.error(result["error"])
+                    st.rerun()
+
 
 # ============================================================
 # PAGE: Pack Status
 # ============================================================
 elif page == "Pack Status":
-    st.title("Pack Status — Designed Packs")
-    st.caption("20 movie packs designed across 7 movies per the plan.")
+    st.title("Pack Status")
 
-    # Load the plan to show pack designs
-    plan_path = os.path.expanduser("~/.claude/plans/sunny-toasting-snowglobe.md")
-    packs_designed = [
-        ("lebowski_the_dude", "The Dude", "The Big Lebowski"),
-        ("lebowski_walter", "Walter Sobchak", "The Big Lebowski"),
-        ("lebowski_jesus", "Jesus Quintana", "The Big Lebowski"),
-        ("lebowski_maude", "Maude Lebowski", "The Big Lebowski"),
-        ("lebowski_big_lebowski", "The Big Lebowski", "The Big Lebowski"),
-        ("starship_rico", "Johnny Rico", "Starship Troopers"),
-        ("starship_rasczak", "Lt. Rasczak", "Starship Troopers"),
-        ("super_troopers", "Ensemble", "Super Troopers"),
-        ("super_troopers_farva", "Farva", "Super Troopers"),
-        ("blues_brothers_jake", "Jake Blues", "The Blues Brothers"),
-        ("blues_brothers_elwood", "Elwood Blues", "The Blues Brothers"),
-        ("blues_brothers", "Ensemble", "The Blues Brothers"),
-        ("anchorman_burgundy", "Ron Burgundy", "Anchorman"),
-        ("anchorman_brick", "Brick Tamland", "Anchorman"),
-        ("anchorman_news_team", "News Team", "Anchorman"),
-        ("zoolander_derek", "Derek Zoolander", "Zoolander"),
-        ("zoolander_hansel", "Hansel", "Zoolander"),
-        ("ghostbusters_venkman", "Peter Venkman", "Ghostbusters"),
-        ("ghostbusters_ray", "Ray Stantz", "Ghostbusters"),
-        ("ghostbusters_egon", "Egon Spengler", "Ghostbusters"),
-    ]
-
+    # Dynamic view from published packs and review summaries
+    review_summary = pack_builder.get_all_pack_review_summary()
     published = pack_builder.get_published_packs()
     published_names = {p["name"] for p in published}
 
     # Also check which movies have extraction scripts
     existing_scripts = set(extraction.get_all_movie_names())
 
-    for pack_slug, character, movie in packs_designed:
-        is_published = pack_slug in published_names
+    if review_summary:
+        for pack in review_summary:
+            name = pack["name"]
+            display = pack["display_name"]
+            sounds = pack["sound_count"]
+            status = pack["pack_status"]
+            flagged = pack["flagged"]
+            ok_count = pack["ok"]
 
-        # Check if the movie has an extraction script (simplified name match)
-        movie_key = movie.lower().replace(" ", "").replace("the", "")
+            if status == "approved":
+                icon = "✅"
+            elif flagged > 0:
+                icon = "🔧"
+            elif ok_count > 0:
+                icon = "🔄"
+            else:
+                icon = "⬜"
 
-        if is_published:
-            icon = "✅"
-        elif any(movie_key[:6] in s for s in existing_scripts):
-            icon = "🔄"
-        else:
-            icon = "⬜"
+            st.markdown(f"{icon} **{name}** — {display} ({sounds} sounds, status: {status})")
+    elif published:
+        for p in published:
+            st.markdown(f"✅ **{p['name']}** — {p['display_name']} ({p['sound_count']} sounds)")
+    else:
+        st.info("No packs published yet. Build packs from the Pack Builder page.")
 
-        st.markdown(f"{icon} **{pack_slug}** — {character} ({movie})")
+    if existing_scripts:
+        st.markdown("---")
+        st.subheader("Movies with extraction scripts")
+        for name in sorted(existing_scripts):
+            in_packs = name in published_names or any(name in p for p in published_names)
+            icon = "✅" if in_packs else "🔄"
+            st.markdown(f"{icon} {name}")
 
     st.markdown("---")
     st.subheader("Legend")
-    st.markdown("✅ Published | 🔄 Extraction in progress | ⬜ Not started")
+    st.markdown("✅ Published/Approved | 🔧 Needs fixes | 🔄 In progress | ⬜ Not started")
 
 
 # ============================================================
-# PAGE: Radarr
+# PAGE: Media Library
 # ============================================================
-elif page == "Radarr":
-    st.title("Radarr Integration")
+elif page == "Media Library":
+    st.title("Media Library")
 
-    # Connection status
-    status = radarr_client.get_status()
-    if isinstance(status, dict) and "error" not in status:
-        st.success(f"Connected to Radarr v{status.get('version', '?')}")
-    else:
-        st.error(f"Cannot connect: {status.get('error', 'Unknown error')}")
+    # Service status row
+    svc_cols = st.columns(3)
+    for col, (svc_key, svc_icon) in zip(svc_cols, [("movie", "🎬"), ("tv", "📺"), ("music", "🎵")]):
+        svc = media_client.SERVICES[svc_key]
+        with col:
+            if media_client.is_available(svc_key):
+                status = media_client.get_status(svc_key)
+                if isinstance(status, dict) and "error" not in status:
+                    st.success(f"{svc_icon} {svc['name']} v{status.get('version', '?')}")
+                else:
+                    st.error(f"{svc_icon} {svc['name']} offline")
+            else:
+                st.warning(f"{svc_icon} {svc['name']} not configured")
 
-    # Download queue
+    st.markdown("---")
+
+    # ---- Quick Add (the box) ----
+    st.subheader("Quick Add")
+    st.caption("Type a name, pick from results, it gets added to your library + extraction pipeline.")
+
+    ml_tab1, ml_tab2, ml_tab3 = st.tabs(["🎬 Movie", "📺 TV Show", "🎵 Music"])
+
+    for tab, svc_key, svc_label, placeholder in [
+        (ml_tab1, "movie", "Radarr", "The Big Lebowski"),
+        (ml_tab2, "tv", "Sonarr", "Breaking Bad"),
+        (ml_tab3, "music", "Lidarr", "Metallica"),
+    ]:
+        with tab:
+            if not media_client.is_available(svc_key):
+                st.warning(f"{svc_label} not configured — add API key to ~/.openpeon/.env")
+                continue
+
+            search_term = st.text_input(
+                f"Search {svc_label}",
+                placeholder=placeholder,
+                key=f"ml_search_{svc_key}",
+            )
+
+            if search_term:
+                results = media_client.search(svc_key, search_term)
+                if isinstance(results, dict) and "error" in results:
+                    st.error(f"{svc_label} error: {results['error']}")
+                elif not results:
+                    st.info("No results found")
+                else:
+                    for i, r in enumerate(results[:8]):
+                        col_poster, col_info, col_btn = st.columns([1, 4, 1])
+                        with col_poster:
+                            if r.get("poster_url"):
+                                st.image(r["poster_url"], width=60)
+                            else:
+                                st.markdown("🎬" if svc_key == "movie" else "📺" if svc_key == "tv" else "🎵")
+                        with col_info:
+                            year_str = f" ({r['year']})" if r.get("year") else ""
+                            st.markdown(f"**{r['title']}**{year_str}")
+                            if r.get("overview"):
+                                st.caption(r["overview"][:150] + ("..." if len(r.get("overview", "")) > 150 else ""))
+                        with col_btn:
+                            if r.get("already_added"):
+                                st.markdown("✅ Added")
+                            else:
+                                if st.button("➕ Add", key=f"ml_add_{svc_key}_{i}", type="primary"):
+                                    with st.spinner(f"Adding to {svc_label}..."):
+                                        qa_result = media_client.quick_add(svc_key, r)
+
+                                    lib = qa_result.get("library_result", {})
+                                    if qa_result.get("library_already_existed"):
+                                        st.info(f"Already in {svc_label}: {qa_result['title']}")
+                                    elif isinstance(lib, dict) and "error" in lib:
+                                        st.error(f"{svc_label}: {lib['error'][:200]}")
+                                    else:
+                                        st.success(f"Added to {svc_label}: {qa_result['title']}")
+
+                                    batch = qa_result.get("batch_result")
+                                    if batch:
+                                        if batch.get("already_exists"):
+                                            st.info(f"Extraction batch exists: {batch.get('slug', '')}")
+                                        elif batch.get("ok"):
+                                            st.success("Extraction batch created!")
+                                        elif batch.get("error"):
+                                            st.error(f"Quote generation failed: {batch['error'][:200]}")
+                                            st.caption("Use 'Retry Quotes' in Pipeline Targets below to try again.")
+
+    # ---- Download Queue ----
+    st.markdown("---")
     st.subheader("Download Queue")
     queue = radarr_client.get_queue()
     if isinstance(queue, dict) and "error" not in queue:
@@ -1222,54 +2108,70 @@ elif page == "Radarr":
     else:
         st.warning("Could not fetch queue")
 
+    # ---- Pipeline movie library ----
     st.markdown("---")
-
-    # Movie library
-    st.subheader("Movie Library (Pipeline Targets)")
-    target_keywords = [
-        "big lebowski", "starship troopers", "super troopers",
-        "blues brothers", "anchorman", "zoolander", "ghostbusters",
-        "whiplash", "few good men", "fight club", "fifth element",
-        "tucker and dale", "pulp fiction", "die hard", "full metal jacket",
-        "glengarry", "tommy boy", "spaceballs", "goodfellas", "airplane",
-    ]
-
+    st.subheader("Pipeline Targets")
     summary = radarr_client.get_movie_status_summary()
     if "error" not in summary:
-        relevant = []
-        for m in summary["movies"]:
-            title_lower = m["title"].lower()
-            if any(kw in title_lower for kw in target_keywords):
-                status_emoji = "🟢" if m["has_file"] else "🔴"
-                relevant.append({
-                    "Status": status_emoji,
-                    "Title": f"{m['title']} ({m['year']})",
-                    "Has File": m["has_file"],
-                    "Size (GB)": m["size_gb"],
-                })
-        if relevant:
-            st.dataframe(relevant, use_container_width=True, hide_index=True)
-        else:
-            st.info("No pipeline-relevant movies found")
+        # Build extraction status index
+        _script_names = set(extraction.get_all_movie_names())
+        _script_data = {s["name"]: s for s in scripts}
 
-    # Add movie
-    st.markdown("---")
-    st.subheader("Add Movie")
-    search_term = st.text_input("Search for movie")
-    if search_term:
-        results = radarr_client.lookup_movie(search_term)
-        if isinstance(results, list) and results:
-            for r in results[:5]:
-                col1, col2 = st.columns([4, 1])
-                col1.write(f"**{r.get('title', '?')}** ({r.get('year', '?')})")
-                if col2.button("Add", key=f"add_{r.get('tmdbId')}"):
-                    result = radarr_client.add_movie(r["tmdbId"])
-                    if "error" in result:
-                        st.error(result["error"][:200])
-                    else:
-                        st.success(f"Added: {r['title']}")
+        # Show ALL movies in Radarr with extraction status
+        all_movies = []
+        movies_needing_quotes = []
+        for m in summary["movies"]:
+            status_emoji = "🟢" if m["has_file"] else "🔴"
+            slug = extraction.slugify(m["title"])
+
+            # Determine extraction script status
+            if slug in _script_names:
+                clip_count = _script_data.get(slug, {}).get("total_clips", 0)
+                if clip_count > 0:
+                    ext_status = f"✅ {clip_count} quotes"
+                else:
+                    ext_status = "⚠️ Empty script"
+                    movies_needing_quotes.append(m)
+            else:
+                ext_status = "❌ No script"
+                movies_needing_quotes.append(m)
+
+            all_movies.append({
+                "": status_emoji,
+                "Title": f"{m['title']} ({m['year']})",
+                "Downloaded": "Yes" if m["has_file"] else "No",
+                "Size (GB)": m["size_gb"],
+                "Extraction": ext_status,
+            })
+        if all_movies:
+            st.dataframe(all_movies, use_container_width=True, hide_index=True)
         else:
-            st.info("No results")
+            st.info("No movies in Radarr")
+
+        # Movies needing quote generation
+        if movies_needing_quotes:
+            st.markdown("---")
+            st.subheader("Movies Needing Quote Generation")
+            st.caption("These movies have no extraction script or empty scripts.")
+            for mi, m in enumerate(movies_needing_quotes):
+                mcol1, mcol2 = st.columns([4, 1])
+                with mcol1:
+                    st.markdown(f"**{m['title']}** ({m['year']})")
+                with mcol2:
+                    if st.button("🔄 Retry Quotes", key=f"retry_quotes_{mi}"):
+                        with st.spinner(f"Generating quotes for {m['title']}..."):
+                            result = media_client.retry_quote_generation(
+                                m["title"], m["year"])
+                        if isinstance(result, dict) and result.get("ok"):
+                            clip_count = result.get("clip_count", 0)
+                            st.success(f"Generated {clip_count} quotes for {m['title']}!")
+                            st.rerun()
+                        elif isinstance(result, dict) and result.get("error"):
+                            st.error(f"Failed: {result['error'][:200]}")
+                        elif isinstance(result, dict) and result.get("message"):
+                            st.info(result["message"])
+                        else:
+                            st.error("Unknown error")
 
 
 # --- Auto-refresh removed ---

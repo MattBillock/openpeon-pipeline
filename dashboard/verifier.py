@@ -10,8 +10,9 @@ from difflib import SequenceMatcher
 log = logging.getLogger(__name__)
 
 
-WHISPER_PYTHON = "/opt/homebrew/Cellar/openai-whisper/20250625_3/libexec/bin/python3"
-EXTRACTION_DIR = os.path.expanduser("~/Development/AIOutput/openpeon/extraction")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
+EXTRACTION_DIR = os.path.join(PROJECT_ROOT, "extraction")
 
 
 def _normalize(text):
@@ -32,7 +33,7 @@ print(json.dumps({{"text": result.get("text", "").strip()}}))
 """
     try:
         result = subprocess.run(
-            [WHISPER_PYTHON, "-c", script],
+            [PROJECT_PYTHON, "-c", script],
             capture_output=True, text=True, timeout=120
         )
         if result.returncode != 0:

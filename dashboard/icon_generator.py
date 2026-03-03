@@ -1,14 +1,16 @@
 """Generate stylized pack icons for OpenPeon sound packs.
 
-Creates 256x256 PNG icons from web-sourced actor photos (Wikipedia/IMDB)
-with themed borders and character name overlay.
-Falls back to Pillow-drawn icons if web fetch fails.
+Creates 256x256 PNG icons from movie posters (via Radarr/TMDB), web-sourced
+actor photos (Wikipedia), or Pillow-drawn fallbacks.
+Priority: movie poster → actor headshot → drawn fallback.
 Registry spec: 256x256 px, PNG/JPEG/WebP/SVG, max 500KB per icon.
 """
 import hashlib
+import json
 import math
 import os
 import re
+import sys
 import time
 from io import BytesIO
 
@@ -16,112 +18,155 @@ import requests
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 
-PACKS_DIR = os.path.expanduser("~/Development/openpeon-movie-packs")
+PACKS_DIR = os.path.expanduser("~/dev/openpeon-movie-packs")
+THEMES_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pack_themes.json")
 
-# Wikipedia article titles for actor headshots
-# Format: pack_name -> {"actor": "Wikipedia_article_title", "character": "display name", ...theme}
-PACK_THEMES = {
-    # Big Lebowski
-    "lebowski_the_dude": {
-        "bg": "#5B3A29", "accent": "#F5DEB3", "icon": "bowling", "initials": "TD",
-        "actor": "Jeff_Bridges", "character": "The Dude",
-    },
-    "lebowski_walter": {
-        "bg": "#556B2F", "accent": "#FFD700", "icon": "gun", "initials": "WS",
-        "actor": "John_Goodman", "character": "Walter",
-    },
-    "lebowski_jesus": {
-        "bg": "#800080", "accent": "#FF69B4", "icon": "bowling", "initials": "JQ",
-        "actor": "John_Turturro", "character": "Jesus",
-    },
-    "lebowski_maude": {
-        "bg": "#8B0000", "accent": "#DDA0DD", "icon": "art", "initials": "ML",
-        "actor": "Julianne_Moore", "character": "Maude",
-    },
-    "lebowski_big_lebowski": {
-        "bg": "#191970", "accent": "#C0C0C0", "icon": "money", "initials": "BL",
-        "actor": "David_Huddleston", "character": "Big Lebowski",
-    },
-    # Starship Troopers
-    "starship_rico": {
-        "bg": "#2F4F4F", "accent": "#FF4500", "icon": "star", "initials": "JR",
-        "actor": "Casper_Van_Dien", "character": "Rico",
-    },
-    "starship_rasczak": {
-        "bg": "#3B3B3B", "accent": "#B22222", "icon": "star", "initials": "LR",
-        "actor": "Michael_Ironside", "character": "Rasczak",
-    },
-    # Super Troopers
-    "super_troopers": {
-        "bg": "#004225", "accent": "#DAA520", "icon": "badge", "initials": "ST",
-        "actor": "Super_Troopers", "character": "Troopers",
-    },
-    "super_troopers_farva": {
-        "bg": "#8B4513", "accent": "#FFD700", "icon": "badge", "initials": "F!",
-        "actor": "Kevin_Heffernan_(actor)", "character": "Farva",
-    },
-    # Blues Brothers
-    "blues_brothers_jake": {
-        "bg": "#000000", "accent": "#FFFFFF", "icon": "sunglasses", "initials": "JB",
-        "actor": "John_Belushi", "character": "Jake",
-    },
-    "blues_brothers_elwood": {
-        "bg": "#1C1C1C", "accent": "#4169E1", "icon": "sunglasses", "initials": "EB",
-        "actor": "Dan_Aykroyd", "character": "Elwood",
-    },
-    "blues_brothers": {
-        "bg": "#000000", "accent": "#4169E1", "icon": "sunglasses", "initials": "BB",
-        "actor": "The_Blues_Brothers", "character": "Blues Bros",
-    },
-    # Anchorman
-    "anchorman_burgundy": {
-        "bg": "#800020", "accent": "#FFD700", "icon": "mic", "initials": "RB",
-        "actor": "Will_Ferrell", "character": "Burgundy",
-    },
-    "anchorman_brick": {
-        "bg": "#FF6347", "accent": "#FFFFE0", "icon": "lamp", "initials": "BT",
-        "actor": "Steve_Carell", "character": "Brick",
-    },
-    "anchorman_news_team": {
-        "bg": "#4B0082", "accent": "#FFD700", "icon": "mic", "initials": "C4",
-        "actor": "Anchorman:_The_Legend_of_Ron_Burgundy", "character": "News Team",
-    },
-    # Zoolander
-    "zoolander_derek": {
-        "bg": "#4682B4", "accent": "#C0C0C0", "icon": "face", "initials": "DZ",
-        "actor": "Ben_Stiller", "character": "Derek",
-    },
-    "zoolander_hansel": {
-        "bg": "#FF8C00", "accent": "#FFFAF0", "icon": "face", "initials": "H!",
-        "actor": "Owen_Wilson", "character": "Hansel",
-    },
-    # Ghostbusters
-    "ghostbusters_venkman": {
-        "bg": "#2E8B57", "accent": "#FF0000", "icon": "ghost", "initials": "PV",
-        "actor": "Bill_Murray", "character": "Venkman",
-    },
-    "ghostbusters_ray": {
-        "bg": "#3CB371", "accent": "#FFD700", "icon": "ghost", "initials": "RS",
-        "actor": "Dan_Aykroyd", "character": "Ray",
-    },
-    "ghostbusters_egon": {
-        "bg": "#006400", "accent": "#00CED1", "icon": "ghost", "initials": "ES",
-        "actor": "Harold_Ramis", "character": "Egon",
-    },
-    # Office Space
-    "office_space": {
-        "bg": "#708090", "accent": "#B22222", "icon": "stapler", "initials": "OS",
-        "actor": "Office_Space", "character": "Office Space",
-    },
-    "office_space_lumbergh": {
-        "bg": "#2F4F4F", "accent": "#FFD700", "icon": "coffee", "initials": "BL",
-        "actor": "Gary_Cole", "character": "Lumbergh",
-    },
-    "office_space_peter": {
-        "bg": "#696969", "accent": "#87CEEB", "icon": "stapler", "initials": "PG",
-        "actor": "Ron_Livingston", "character": "Peter",
-    },
-}
+
+def _load_themes_config():
+    """Load pack themes and movie map from pack_themes.json.
+
+    Returns (movie_map, themes) dicts. Falls back to empty dicts if file missing.
+    """
+    if not os.path.exists(THEMES_FILE):
+        return {}, {}
+    try:
+        with open(THEMES_FILE) as f:
+            data = json.load(f)
+        return data.get("movie_map", {}), data.get("themes", {})
+    except Exception:
+        return {}, {}
+
+
+def _get_movie_title_for_pack(pack_name):
+    """Resolve a pack name to its source movie title.
+
+    Checks the pack's openpeon.json manifest first, then falls back to
+    pack_themes.json movie_map (exact match, then prefix match).
+    """
+    # Try manifest first
+    manifest_path = os.path.join(PACKS_DIR, pack_name, "openpeon.json")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path) as f:
+                m = json.load(f)
+            title = m.get("display_name")
+            if title:
+                return title
+        except Exception:
+            pass
+
+    # Fall back to themes config
+    movie_map, _ = _load_themes_config()
+    if pack_name in movie_map:
+        return movie_map[pack_name]
+    for prefix, title in sorted(movie_map.items(), key=lambda x: -len(x[0])):
+        if pack_name.startswith(prefix):
+            return title
+    return None
+
+
+def _get_radarr_poster_url(movie_title):
+    """Look up a movie in Radarr and return its TMDB poster URL.
+
+    Returns (poster_url, movie_title_found) or (None, None) on failure.
+    """
+    # Import radarr_client from same directory
+    dashboard_dir = os.path.dirname(os.path.abspath(__file__))
+    if dashboard_dir not in sys.path:
+        sys.path.insert(0, dashboard_dir)
+    try:
+        import radarr_client
+    except ImportError:
+        print("  radarr_client not available")
+        return None, None
+
+    movies = radarr_client.get_all_movies()
+    if isinstance(movies, dict) and "error" in movies:
+        print(f"  Radarr error: {movies['error']}")
+        return None, None
+
+    # Find movie by title (case-insensitive)
+    target = movie_title.lower()
+    for m in movies:
+        if m.get("title", "").lower() == target:
+            images = m.get("images", [])
+            for img in images:
+                if img.get("coverType") == "poster":
+                    url = img.get("remoteUrl") or img.get("url")
+                    if url:
+                        return url, m["title"]
+    return None, None
+
+
+def fetch_movie_poster(pack_name, size=500):
+    """Fetch the movie poster for a pack via Radarr/TMDB.
+
+    Returns PIL Image or None on failure.
+    """
+    movie_title = _get_movie_title_for_pack(pack_name)
+    if not movie_title:
+        return None
+
+    poster_url, found_title = _get_radarr_poster_url(movie_title)
+    if not poster_url:
+        print(f"  No poster found for '{movie_title}' in Radarr")
+        return None
+
+    try:
+        resp = requests.get(poster_url, timeout=15)
+        resp.raise_for_status()
+        img = Image.open(BytesIO(resp.content)).convert("RGB")
+        print(f"  Fetched poster for '{found_title}' ({img.size[0]}x{img.size[1]})")
+        return img
+    except Exception as e:
+        print(f"  Poster download failed for '{movie_title}': {e}")
+        return None
+
+
+def generate_poster_icon(pack_name, size=256):
+    """Generate a pack icon from the movie poster.
+
+    Crops the poster to a square (from center-top, since titles/faces
+    are usually in the upper portion), resizes to 256x256.
+    Adds character name label if the pack is character-specific.
+
+    Returns (PIL Image, source_info) or (None, error_info).
+    """
+    poster = fetch_movie_poster(pack_name, size=800)
+    if poster is None:
+        return None, "no_poster"
+
+    w, h = poster.size
+
+    # Movie posters are typically 2:3 portrait. Crop to square from top-center
+    # (keeps the title treatment and main characters visible).
+    sq = min(w, h)
+    left = (w - sq) // 2
+    # Bias toward upper portion: start at 10% from top instead of center
+    top = min(int(h * 0.10), h - sq)
+    top = max(0, top)
+    cropped = poster.crop((left, top, left + sq, top + sq))
+    resized = cropped.resize((size, size), Image.LANCZOS)
+
+    # Add character label for character-specific packs
+    theme = _get_pack_themes().get(pack_name, {})
+    character = theme.get("character")
+    accent = theme.get("accent", "#FFFFFF")
+    if character:
+        resized = add_character_label(resized, character, accent, size=size)
+
+    movie_title = _get_movie_title_for_pack(pack_name) or pack_name
+    return resized, f"poster:{movie_title}"
+
+
+def _get_pack_themes():
+    """Load pack themes from pack_themes.json config file.
+
+    Returns dict of {pack_name: {bg, accent, icon, initials, actor, character, ...}}.
+    Falls back to empty dict if file not found.
+    """
+    _, themes = _load_themes_config()
+    return themes
 
 
 def hex_to_rgb(hex_color):
@@ -228,7 +273,7 @@ def generate_web_icon(pack_name, size=256):
 
     Returns (PIL Image, source_info) or (None, error_info).
     """
-    theme = PACK_THEMES.get(pack_name)
+    theme = _get_pack_themes().get(pack_name)
     if not theme or "actor" not in theme:
         return None, "no_theme"
 
@@ -329,14 +374,22 @@ ICON_DRAWERS = {
 
 
 def generate_icon(pack_name, size=256):
-    """Generate an icon for a pack. Tries web fetch first, falls back to drawn."""
-    # Try web-sourced icon first
+    """Generate an icon for a pack.
+
+    Priority: movie poster → Wikipedia actor headshot → Pillow-drawn fallback.
+    """
+    # Try movie poster first (best for movie packs)
+    poster_img, poster_src = generate_poster_icon(pack_name, size=size)
+    if poster_img is not None:
+        return poster_img
+
+    # Try web-sourced actor headshot
     web_img, source = generate_web_icon(pack_name, size=size)
     if web_img is not None:
         return web_img
 
     # Fallback: Pillow-drawn icon
-    theme = PACK_THEMES.get(pack_name, {
+    theme = _get_pack_themes().get(pack_name, {
         "bg": "#333333",
         "accent": "#FFFFFF",
         "icon": "generic",
@@ -397,20 +450,30 @@ def generate_and_save_icon(pack_name, size=256, force_web=False):
 
     source = "fallback"
     if force_web:
-        web_img, src = generate_web_icon(pack_name, size=size)
-        if web_img is not None:
-            web_img.save(icon_path, "PNG", optimize=True)
-            source = src
+        # Try poster first, then Wikipedia, then fallback
+        poster_img, poster_src = generate_poster_icon(pack_name, size=size)
+        if poster_img is not None:
+            poster_img.save(icon_path, "PNG", optimize=True)
+            source = poster_src
         else:
-            img = generate_icon(pack_name, size)
-            img.save(icon_path, "PNG", optimize=True)
+            web_img, src = generate_web_icon(pack_name, size=size)
+            if web_img is not None:
+                web_img.save(icon_path, "PNG", optimize=True)
+                source = src
+            else:
+                img = generate_icon(pack_name, size)
+                img.save(icon_path, "PNG", optimize=True)
     else:
         img = generate_icon(pack_name, size)
         img.save(icon_path, "PNG", optimize=True)
-        # Check if web icon was used
-        web_img, src = generate_web_icon(pack_name, size=size)
-        if web_img is not None:
-            source = src
+        # Determine what source was used
+        poster_img, poster_src = generate_poster_icon(pack_name, size=size)
+        if poster_img is not None:
+            source = poster_src
+        else:
+            web_img, src = generate_web_icon(pack_name, size=size)
+            if web_img is not None:
+                source = src
 
     file_size = os.path.getsize(icon_path)
     return {
@@ -425,17 +488,28 @@ def generate_and_save_icon(pack_name, size=256, force_web=False):
 def generate_all_icons(size=256, force_web=False, delay=2.0):
     """Generate icons for all packs that don't have one yet (or all if force_web).
 
+    Discovers packs from both _get_pack_themes() and the packs directory.
+
     Args:
         delay: Seconds to wait between web fetches to avoid rate limiting.
     """
+    # Discover all packs: union of _get_pack_themes() keys and actual pack dirs
+    all_packs = set(_get_pack_themes().keys())
+    if os.path.isdir(PACKS_DIR):
+        for name in os.listdir(PACKS_DIR):
+            manifest = os.path.join(PACKS_DIR, name, "openpeon.json")
+            if os.path.exists(manifest):
+                all_packs.add(name)
+
     results = []
-    for pack_name in sorted(PACK_THEMES.keys()):
+    for pack_name in sorted(all_packs):
         pack_dir = os.path.join(PACKS_DIR, pack_name)
         icon_path = os.path.join(pack_dir, "icons", "pack.png")
         if os.path.isdir(pack_dir) and (force_web or not os.path.exists(icon_path)):
             result = generate_and_save_icon(pack_name, size, force_web=force_web)
             result["pack"] = pack_name
             results.append(result)
-            if force_web and result.get("source", "").startswith("wikipedia"):
+            src = result.get("source", "")
+            if force_web and (src.startswith("wikipedia") or src.startswith("poster")):
                 time.sleep(delay)
     return results

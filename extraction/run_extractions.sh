@@ -8,18 +8,21 @@
 #   MAX_PARALLEL=2 ./run_extractions.sh     # Run 2 at a time
 set -uo pipefail
 
-WHISPER_PYTHON="/opt/homebrew/Cellar/openai-whisper/20250625_3/libexec/bin/python3"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PROJECT_PYTHON="$PROJECT_ROOT/.venv/bin/python3"
 MAX_PARALLEL="${MAX_PARALLEL:-1}"  # Keep at 1 to avoid SMB I/O contention on network-mounted MKVs
 
 # Ensure homebrew binaries (ffmpeg, ffprobe) are in PATH
 export PATH="/opt/homebrew/bin:$PATH"
 
-ALL_MOVIES=(
-  afewgoodmen airplane diehard fifthelement fightclub
-  fullmetaljacket glengarry goodfellas pulpfiction
-  spaceballs tommyboy tuckerdale whiplash
-)
+# Auto-discover movies from extraction scripts
+ALL_MOVIES=()
+for script in "$SCRIPT_DIR"/extract_*.py; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script" | sed 's/extract_//;s/\.py//')
+    ALL_MOVIES+=("$name")
+done
 
 # Filter to requested movies if specified
 if [ $# -gt 0 ]; then
@@ -32,7 +35,7 @@ echo "============================================"
 echo "  OpenPeon Extraction Runner"
 echo "  Movies: ${#MOVIES[@]}"
 echo "  Parallel: $MAX_PARALLEL"
-echo "  Python: $WHISPER_PYTHON"
+echo "  Python: $PROJECT_PYTHON"
 echo "============================================"
 
 running=0
@@ -50,7 +53,7 @@ for movie in "${MOVIES[@]}"; do
   mkdir -p "$SCRIPT_DIR/${movie}"
 
   echo "[$(date +%H:%M:%S)] START: $movie"
-  "$WHISPER_PYTHON" -u "$script" > "$logfile" 2>&1 &
+  "$PROJECT_PYTHON" -u "$script" > "$logfile" 2>&1 &
   pids+=($!)
   names+=("$movie")
   running=$((running + 1))

@@ -6,13 +6,50 @@ import os
 import re
 import subprocess
 import signal
+import time
 
 log = logging.getLogger(__name__)
 
 
-EXTRACTION_DIR = os.path.expanduser("~/Development/AIOutput/openpeon/extraction")
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_PYTHON = os.path.join(PROJECT_ROOT, ".venv", "bin", "python3")
+EXTRACTION_DIR = os.path.join(PROJECT_ROOT, "extraction")
 SCRIPTS_PATTERN = os.path.join(EXTRACTION_DIR, "extract_*.py")
 MOVIES_DIR = "/Volumes/D-drive-music/Movies"
+
+# Default concurrent extractions — adjustable via sidebar slider in the UI.
+# Stored in a mutable container so the UI can update it at runtime.
+_SETTINGS_PATH = os.path.join(PROJECT_ROOT, ".openpeon_settings.json")
+
+
+def _load_settings():
+    try:
+        with open(_SETTINGS_PATH) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_settings(settings):
+    try:
+        with open(_SETTINGS_PATH, "w") as f:
+            json.dump(settings, f, indent=2)
+    except Exception as e:
+        log.warning("Failed to save settings: %s", e)
+
+
+def get_max_concurrent():
+    return _load_settings().get("max_concurrent_extractions", 2)
+
+
+def set_max_concurrent(n):
+    settings = _load_settings()
+    settings["max_concurrent_extractions"] = max(1, min(n, 4))
+    _save_settings(settings)
+
+
+# Legacy constant — use get_max_concurrent() instead
+MAX_CONCURRENT_EXTRACTIONS = 2
 
 # Template for new extraction scripts
 _SCRIPT_TEMPLATE = '''#!/usr/bin/env python3
@@ -273,6 +310,9 @@ def get_all_scripts():
         rejected_count = len([c for c in review.values() if c.get("status") == "rejected"])
         unreviewed_count = len(extracted) - approved_count - rejected_count
 
+        # Last activity from extraction_log.json mtime
+        last_activity = get_last_activity(name)
+
         scripts.append({
             "name": name,
             "script_path": script_path,
@@ -289,9 +329,22 @@ def get_all_scripts():
             "needs_review": review_count,
             "failed": failed,
             "ext_log": ext_log,
+            "last_activity": last_activity,
         })
 
     return scripts
+
+
+def get_last_activity(name):
+    """Get the last-modified time of extraction_log.json as a proxy for activity.
+
+    Returns epoch float or None if no log exists.
+    """
+    log_path = os.path.join(EXTRACTION_DIR, name, "extraction_log.json")
+    try:
+        return os.path.getmtime(log_path)
+    except OSError:
+        return None
 
 
 def _load_extraction_log(name):
@@ -332,8 +385,21 @@ def _is_script_running(script_path):
         return False
 
 
+def _count_running_extractions():
+    """Count how many extraction scripts are currently running."""
+    count = 0
+    for script_path in glob.glob(SCRIPTS_PATTERN):
+        if _is_script_running(script_path):
+            count += 1
+    return count
+
+
 def start_extraction(name, targets=None):
-    """Start an extraction script as a background process."""
+    """Start an extraction script as a background process.
+
+    Enforces MAX_CONCURRENT_EXTRACTIONS to protect system resources.
+    Uses nice -n 10 so ffmpeg/Whisper don't starve macOS audio.
+    """
     script_path = os.path.join(EXTRACTION_DIR, f"extract_{name}.py")
     if not os.path.exists(script_path):
         return {"error": f"Script not found: {script_path}"}
@@ -341,11 +407,23 @@ def start_extraction(name, targets=None):
     if _is_script_running(script_path):
         return {"error": f"Already running: {name}"}
 
+    # Enforce concurrency limit
+    max_concurrent = get_max_concurrent()
+    running_count = _count_running_extractions()
+    if running_count >= max_concurrent:
+        return {
+            "error": f"Limit reached: {running_count}/{max_concurrent} "
+                     f"extraction(s) already running. Stop one first or wait for it to finish.",
+        }
+
     output_dir = os.path.join(EXTRACTION_DIR, name)
     log_path = os.path.join(output_dir, "extraction.log")
     os.makedirs(output_dir, exist_ok=True)
 
-    cmd = ["python3", "-u", script_path]
+    # Use project venv python (has both whisper and all deps).
+    # nice -n 10 to avoid starving macOS audio.
+    python = PROJECT_PYTHON if os.path.exists(PROJECT_PYTHON) else "python3"
+    cmd = ["nice", "-n", "10", python, "-u", script_path]
     if targets:
         cmd.extend(targets)
 
@@ -463,6 +541,49 @@ def save_clip_review(name, clip_name, status, category="", notes=""):
     return review
 
 
+def save_clip_category(name, clip_name, category):
+    """Save only the category for a clip, preserving existing status/notes."""
+    review = _load_review(name)
+    existing = review.get(clip_name, {})
+    existing["category"] = category
+    review[clip_name] = existing
+
+    output_dir = os.path.join(EXTRACTION_DIR, name)
+    review_path = os.path.join(output_dir, "review.json")
+    os.makedirs(output_dir, exist_ok=True)
+    with open(review_path, "w") as f:
+        json.dump(review, f, indent=2)
+
+    return review
+
+
+def count_uncategorized_approved(name):
+    """Count approved clips that have no category assigned.
+
+    Lightweight scan of review.json — avoids expensive get_clips_for_review().
+    """
+    review = _load_review(name)
+    count = 0
+    for clip_data in review.values():
+        if clip_data.get("status") == "approved" and not clip_data.get("category"):
+            count += 1
+    return count
+
+
+def get_category_counts(name):
+    """Get counts of clips assigned to each CESP category for a movie.
+
+    Returns dict of {category: count}. Useful for needs-based suggestions.
+    """
+    review = _load_review(name)
+    counts = {}
+    for clip_data in review.values():
+        cat = clip_data.get("category", "")
+        if cat:
+            counts[cat] = counts.get(cat, 0) + 1
+    return counts
+
+
 def get_extraction_log(name, tail=50):
     """Get the last N lines of an extraction log."""
     log_path = os.path.join(EXTRACTION_DIR, name, "extraction.log")
@@ -486,27 +607,51 @@ def get_all_movie_names():
     return names
 
 
-def retry_clip(name, clip_name):
+def retry_clip(name, clip_name, override_timestamp=None):
     """Re-run extraction for a single clip on Mini via SSH.
 
     Steps:
     1. Clear the clip's verify_status in extraction_log.json (so extractor won't skip it)
-    2. SSH to Mini and run the extraction script for just this clip
-    3. Sync results back locally
+    2. If override_timestamp provided, write to overrides.json
+    3. SSH to Mini and run the extraction script for just this clip
+    4. Sync results back locally
     """
     # 1. Clear clip from extraction log so extractor re-processes it
     _clear_clip_from_log(name, clip_name)
 
+    # 2. Write manual timestamp override if provided
+    if override_timestamp is not None:
+        overrides_path = os.path.join(EXTRACTION_DIR, name, "overrides.json")
+        overrides = {}
+        if os.path.exists(overrides_path):
+            try:
+                with open(overrides_path) as f:
+                    overrides = json.load(f)
+            except Exception:
+                pass
+        overrides[clip_name] = float(override_timestamp)
+        with open(overrides_path, "w") as f:
+            json.dump(overrides, f, indent=2)
+        # Sync overrides to Mini
+        try:
+            subprocess.run(
+                ["rsync", "-q", overrides_path,
+                 f"mini:~/dev/openpeon/extraction/{name}/overrides.json"],
+                timeout=10, capture_output=True,
+            )
+        except Exception as e:
+            log.warning("Failed to sync overrides to Mini: %s", e)
+
     # 2. Run on Mini via SSH (where Whisper and MKVs are)
-    remote_dir = f"~/Development/AIOutput/openpeon/extraction"
-    whisper_python = "/opt/homebrew/Cellar/openai-whisper/20250625_3/libexec/bin/python3"
+    remote_dir = f"~/dev/openpeon/extraction"
+    remote_python = "~/dev/openpeon/.venv/bin/python3"
     remote_script = f"{remote_dir}/extract_{name}.py"
 
     ssh_cmd = [
         "ssh", "mini",
         f"export PATH=/opt/homebrew/bin:$PATH && "
         f"cd {remote_dir} && "
-        f"{whisper_python} -u {remote_script} {clip_name}"
+        f"{remote_python} -u {remote_script} {clip_name}"
     ]
 
     output_dir = os.path.join(EXTRACTION_DIR, name)
@@ -531,43 +676,47 @@ def retry_clip(name, clip_name):
 def _clear_clip_from_log(name, clip_name):
     """Clear a clip's verify_status from extraction_log.json so extractor re-processes it.
 
-    Also clears on Mini via SSH so both local and remote logs are in sync.
+    Saves the failed found_at timestamp into exclude_positions so the next
+    extraction attempt skips that region and finds a different match.
+
+    Also syncs the modified log to Mini via rsync.
     """
-    # Clear locally
+    # Clear locally + accumulate exclusions
     local_log = os.path.join(EXTRACTION_DIR, name, "extraction_log.json")
     if os.path.exists(local_log):
         try:
             with open(local_log) as f:
                 data = json.load(f)
             if clip_name in data and isinstance(data[clip_name], dict):
-                data[clip_name].pop("verify_status", None)
-                data[clip_name].pop("final_status", None)
-                data[clip_name].pop("verify_score", None)
-                data[clip_name].pop("verify_heard", None)
+                entry = data[clip_name]
+                # Save failed position for exclusion on retry
+                found_at = entry.get("found_at")
+                if found_at is not None:
+                    excludes = entry.get("exclude_positions", [])
+                    if found_at not in excludes:
+                        excludes.append(found_at)
+                    entry["exclude_positions"] = excludes
+
+                entry.pop("verify_status", None)
+                entry.pop("final_status", None)
+                entry.pop("verify_score", None)
+                entry.pop("verify_heard", None)
                 with open(local_log, "w") as f:
                     json.dump(data, f, indent=2)
-                log.info("Cleared local extraction log for %s/%s", name, clip_name)
+                log.info("Cleared local extraction log for %s/%s (excludes: %s)",
+                         name, clip_name, entry.get("exclude_positions", []))
         except Exception as e:
             log.warning("Failed to clear local log for %s/%s: %s", name, clip_name, e)
 
-    # Clear on Mini too
-    remote_log = f"~/Development/AIOutput/openpeon/extraction/{name}/extraction_log.json"
-    clear_cmd = (
-        f"python3 -c \""
-        f"import json; "
-        f"p='{remote_log}'.replace('~', __import__('os').path.expanduser('~')); "
-        f"d=json.load(open(p)) if __import__('os').path.exists(p) else {{}}; "
-        f"d.get('{clip_name}', {{}}).pop('verify_status', None); "
-        f"d.get('{clip_name}', {{}}).pop('final_status', None); "
-        f"d.get('{clip_name}', {{}}).pop('verify_score', None); "
-        f"d.get('{clip_name}', {{}}).pop('verify_heard', None); "
-        f"json.dump(d, open(p, 'w'), indent=2)"
-        f"\""
-    )
+    # Sync modified log to Mini via rsync (replaces fragile inline Python)
+    remote_log = f"mini:~/dev/openpeon/extraction/{name}/extraction_log.json"
     try:
-        subprocess.run(["ssh", "mini", clear_cmd], timeout=10, capture_output=True)
+        subprocess.run(
+            ["rsync", "-q", local_log, remote_log],
+            timeout=10, capture_output=True,
+        )
     except Exception as e:
-        log.warning("Failed to clear remote log for %s/%s: %s", name, clip_name, e)
+        log.warning("Failed to sync log to Mini for %s/%s: %s", name, clip_name, e)
 
 
 def sync_from_mini(movie_name=None):
@@ -591,6 +740,68 @@ def sync_from_mini(movie_name=None):
         return {"error": "Sync timed out (60s)"}
     except Exception as e:
         return {"error": str(e)}
+
+
+def delete_transcript(name):
+    """Delete corrupted full_transcript.json locally and on Mini via SSH."""
+    local_path = os.path.join(EXTRACTION_DIR, name, "full_transcript.json")
+    deleted_local = False
+    deleted_remote = False
+
+    if os.path.exists(local_path):
+        try:
+            os.unlink(local_path)
+            deleted_local = True
+        except OSError as e:
+            return {"ok": False, "error": f"Failed to delete local transcript: {e}"}
+
+    # Delete on Mini too
+    remote_path = f"~/dev/openpeon/extraction/{name}/full_transcript.json"
+    try:
+        result = subprocess.run(
+            ["ssh", "-o", "ConnectTimeout=3", "mini", f"rm -f {remote_path}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        deleted_remote = result.returncode == 0
+    except Exception as e:
+        log.warning("Failed to delete remote transcript for %s: %s", name, e)
+
+    return {
+        "ok": True,
+        "deleted_local": deleted_local,
+        "deleted_remote": deleted_remote,
+    }
+
+
+def reset_movie_extraction(name):
+    """Clear extraction_log.json + full_transcript.json for a full re-run.
+
+    Keeps existing MP3 files intact (they'll be re-verified on next run).
+    """
+    output_dir = os.path.join(EXTRACTION_DIR, name)
+    deleted = []
+
+    for filename in ["extraction_log.json", "full_transcript.json"]:
+        path = os.path.join(output_dir, filename)
+        if os.path.exists(path):
+            try:
+                os.unlink(path)
+                deleted.append(filename)
+            except OSError as e:
+                return {"ok": False, "error": f"Failed to delete {filename}: {e}"}
+
+    # Also clear on Mini
+    for filename in ["extraction_log.json", "full_transcript.json"]:
+        remote_path = f"~/dev/openpeon/extraction/{name}/{filename}"
+        try:
+            subprocess.run(
+                ["ssh", "-o", "ConnectTimeout=3", "mini", f"rm -f {remote_path}"],
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass  # Best-effort remote cleanup
+
+    return {"ok": True, "deleted": deleted}
 
 
 # =================================================================
@@ -711,14 +922,39 @@ _CATEGORY_HINTS = {
 }
 
 
-def suggest_category(quote, clip_name=""):
+def suggest_category(quote, clip_name="", category_counts=None):
     """Suggest a CESP category for a quote based on content analysis.
 
     Returns list of (category, confidence) tuples sorted by confidence.
-    Confidence is 0.0-1.0.
+    Always returns at least one category — when no patterns match, uses
+    needs-based fallback (prefers under-filled categories).
+
+    Args:
+        quote: The quote text to categorize.
+        clip_name: Optional clip name for heuristics.
+        category_counts: Optional dict of {category: count} for needs-based
+            fallback. Categories with fewer clips get priority when no
+            strong pattern match exists.
     """
+    # Default fallback priority (most generic -> most specific)
+    _FALLBACK_ORDER = [
+        "task.error",       # Most quotes are reactive/exclamatory
+        "task.acknowledge",  # Many quotes are agreements/responses
+        "session.start",    # Greetings and intros
+        "task.complete",    # Victory/done quotes
+        "input.required",   # Questions
+        "user.spam",        # Dismissals
+        "resource.limit",   # Exhaustion/defeat
+    ]
+
+    all_categories = list(_CATEGORY_HINTS.keys())
+
     if not quote:
-        return []
+        # Even with no quote, return a needs-based suggestion
+        if category_counts:
+            ranked = sorted(all_categories, key=lambda c: category_counts.get(c, 0))
+            return [(c, 0.05) for c in ranked]
+        return [(c, 0.05) for c in _FALLBACK_ORDER]
 
     quote_lower = quote.lower().strip()
     scores = {}
@@ -754,8 +990,23 @@ def suggest_category(quote, clip_name=""):
         # Cap at 1.0
         scores[category] = min(score, 1.0)
 
-    # Sort by score descending, filter out zeros
-    results = [(cat, score) for cat, score in scores.items() if score > 0]
-    results.sort(key=lambda x: x[1], reverse=True)
+    # Check if we got any real matches
+    has_matches = any(s > 0 for s in scores.values())
 
-    return results
+    if has_matches:
+        # Sort by score descending — include all categories, matched ones first
+        matched = [(cat, score) for cat, score in scores.items() if score > 0]
+        matched.sort(key=lambda x: x[1], reverse=True)
+        # Append unmatched categories with tiny scores for completeness
+        unmatched_cats = [c for c in all_categories if scores.get(c, 0) == 0]
+        if category_counts:
+            unmatched_cats.sort(key=lambda c: category_counts.get(c, 0))
+        unmatched = [(c, 0.01) for c in unmatched_cats]
+        return matched + unmatched
+    else:
+        # No pattern matches at all — use needs-based fallback
+        if category_counts:
+            # Prefer categories with fewest assigned clips
+            ranked = sorted(all_categories, key=lambda c: category_counts.get(c, 0))
+            return [(c, 0.05) for c in ranked]
+        return [(c, 0.05) for c in _FALLBACK_ORDER]
