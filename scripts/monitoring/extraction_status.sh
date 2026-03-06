@@ -34,11 +34,20 @@ echo ""
 echo -e "${BOLD}Movie Status${NC}"
 echo "─────────────────────────────────────"
 
-ALL_MOVIES=(
-    afewgoodmen airplane diehard fifthelement fightclub
-    fullmetaljacket glengarry goodfellas pulpfiction
-    spaceballs tommyboy tuckerdale whiplash orgazmo
-)
+# Auto-discover movies from extraction scripts
+ALL_MOVIES=()
+for script in "$EXTRACTION_DIR"/extract_*.py; do
+    [ -f "$script" ] || continue
+    name=$(basename "$script" | sed 's/extract_//;s/\.py//')
+    ALL_MOVIES+=("$name")
+done
+# Also include any movie dirs that have output but no script
+for dir in "$EXTRACTION_DIR"/*/; do
+    [ -d "$dir" ] || continue
+    name=$(basename "$dir")
+    [[ " ${ALL_MOVIES[*]:-} " == *" $name "* ]] && continue
+    [ -f "$dir/extraction_log.json" ] || [ "$(find "$dir" -name '*.mp3' 2>/dev/null | head -1)" ] && ALL_MOVIES+=("$name")
+done
 
 for movie in "${ALL_MOVIES[@]}"; do
     dir="$EXTRACTION_DIR/$movie"

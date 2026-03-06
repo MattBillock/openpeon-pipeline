@@ -94,7 +94,7 @@ def generate_quotes(title, year=""):
     """Call Anthropic API to generate movie quotes for extraction.
 
     Args:
-        title: Movie title (e.g. "Ghostbusters")
+        title: Movie title (e.g. "My Movie")
         year: Optional year (e.g. "1984")
 
     Returns:

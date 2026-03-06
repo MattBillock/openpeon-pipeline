@@ -611,9 +611,9 @@ elif page == "Extraction Control":
     ])
 
     for tab, svc_key, svc_label, placeholder in [
-        (qa_tab1, "movie", "Radarr", "The Big Lebowski"),
-        (qa_tab2, "tv", "Sonarr", "Breaking Bad"),
-        (qa_tab3, "music", "Lidarr", "Metallica"),
+        (qa_tab1, "movie", "Radarr", "Search for a movie"),
+        (qa_tab2, "tv", "Sonarr", "Search for a show"),
+        (qa_tab3, "music", "Lidarr", "Search for an artist"),
     ]:
         with tab:
             if not media_client.is_available(svc_key):
@@ -677,7 +677,7 @@ elif page == "Extraction Control":
         # ---- Add Local Movie as Extraction Batch ----
         st.caption("Create extraction batch for a movie already on disk — quotes auto-generated via LLM")
 
-        local_search = st.text_input("Search D-drive for MKV", placeholder="Ghostbusters",
+        local_search = st.text_input("Search D-drive for MKV", placeholder="Movie name",
                                      key="local_movie_search")
         if local_search:
             mkv_results = extraction.find_mkv_files(local_search)
@@ -2024,9 +2024,9 @@ elif page == "Media Library":
     ml_tab1, ml_tab2, ml_tab3 = st.tabs(["🎬 Movie", "📺 TV Show", "🎵 Music"])
 
     for tab, svc_key, svc_label, placeholder in [
-        (ml_tab1, "movie", "Radarr", "The Big Lebowski"),
-        (ml_tab2, "tv", "Sonarr", "Breaking Bad"),
-        (ml_tab3, "music", "Lidarr", "Metallica"),
+        (ml_tab1, "movie", "Radarr", "Search for a movie"),
+        (ml_tab2, "tv", "Sonarr", "Search for a show"),
+        (ml_tab3, "music", "Lidarr", "Search for an artist"),
     ]:
         with tab:
             if not media_client.is_available(svc_key):

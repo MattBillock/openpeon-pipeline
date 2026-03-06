@@ -22,6 +22,9 @@ extraction/extraction_runner.log
 # Dashboard working data
 drafts/
 
+# Plans (contain movie-specific content)
+plans/
+
 # Runtime settings
 .openpeon_settings.json
 

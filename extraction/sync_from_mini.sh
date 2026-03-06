@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./sync_from_mini.sh              # Sync all movies
-#   ./sync_from_mini.sh spaceballs   # Sync specific movie
+#   ./sync_from_mini.sh mymovie      # Sync specific movie
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

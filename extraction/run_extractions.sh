@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./run_extractions.sh                    # Run all movies sequentially
-#   ./run_extractions.sh spaceballs diehard  # Run specific movies
+#   ./run_extractions.sh mymovie othermovie  # Run specific movies
 #   MAX_PARALLEL=2 ./run_extractions.sh     # Run 2 at a time
 set -uo pipefail
 
